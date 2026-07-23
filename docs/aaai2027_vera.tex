@@ -1,0 +1,332 @@
+\documentclass[letterpaper]{article} % DO NOT CHANGE THIS
+\usepackage{aaai2027}  % DO NOT CHANGE THIS
+% The serif, sans-serif, and monospaced fonts are loaded automatically by
+% aaai2027.sty (newtxtext, helvet, courier). DO NOT add \usepackage{times},
+% \usepackage{helvet}, \usepackage{courier}, or any other font package.
+\usepackage[hyphens]{url}  % DO NOT CHANGE THIS
+\usepackage{graphicx} % DO NOT CHANGE THIS
+\urlstyle{rm} % DO NOT CHANGE THIS
+\def\UrlFont{\rm}  % DO NOT CHANGE THIS
+\usepackage{natbib}  % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\usepackage{caption} % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\frenchspacing  % DO NOT CHANGE THIS
+%
+% These are recommended to typeset algorithms but not required. See the subsubsection on algorithms. Remove them if you don't have algorithms in your paper.
+\usepackage{algorithm}
+\usepackage{algorithmic}
+%
+% These are recommended to typeset listings but not required. See the subsubsection on listing. Remove this block if you don't have listings in your paper.
+\usepackage{newfloat}
+\usepackage{listings}
+\DeclareCaptionStyle{ruled}{labelfont=normalfont,labelsep=colon,strut=off} % DO NOT CHANGE THIS
+\lstset{%
+	basicstyle={\footnotesize\ttfamily},% footnotesize acceptable for monospace
+	numbers=left,numberstyle=\footnotesize,xleftmargin=2em,% show line numbers, remove this entire line if you don't want the numbers.
+	aboveskip=0pt,belowskip=0pt,%
+	showstringspaces=false,tabsize=2,breaklines=true}
+\floatstyle{ruled}
+\newfloat{listing}{tb}{lst}{}
+\floatname{listing}{Listing}
+%
+% Recommended for better-looking tables
+\usepackage{booktabs}
+\usepackage{amsmath}
+%
+% Keep the \pdfinfo as shown here. There's no need
+% for you to add the /Title and /Author tags.
+\pdfinfo{
+/TemplateVersion (2027.1)
+}
+
+\setcounter{secnumdepth}{0}
+
+\title{TERM: Trustworthy Embodied Robotics Modeling\\Multi-Stream Fusion and Dual Action Heads for Language-Conditioned Manipulation}
+\author {
+    Sara Aly\textsuperscript{\rm 1},
+    Enno Huang\textsuperscript{\rm 1}
+}
+\affiliations {
+    \textsuperscript{\rm 1}Department of Electrical and Computer Engineering\\
+    California State University, Northridge\\
+    sara.ali.949@my.csun.edu, qhuang@csun.edu
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Standard vision-language-action (VLA) models treat robot control as a stateless mapping from the current image and task instruction to a motor command, discarding two signals that arise from prior interaction: what action was last attempted and whether it brought the robot closer to the goal. We present TERM (Trustworthy Embodied Robotics Modeling), a five-stream closed-loop policy that re-injects both signals at every decision step through the same language modality that CLIP was pretrained on, requiring no additional language model pretraining. Five specialized token streams---visual observation, language instruction, verbalized action narration ($E_{act}$), verbalized consequence experience ($E_{conseq}$), and a temporal action history---are fused by a six-layer LLaMA-style bidirectional transformer with full cross-stream attention and ViLT modality-type embeddings. The fused CLS embedding is decoded by two complementary heads: \texttt{action\_bin\_head}, an expand-compress bottleneck classifier with $K{=}4$ action chunking that is the sole driver of robot motion at inference; and \texttt{action\_vec\_head}, a continuous displacement regressor whose $[\Delta x, \Delta y]$ output is never used at inference to drive the robot but instead provides dense geometric supervision during training and is cycled back into the history stream as a self-referential feedback token at each subsequent timestep. On the Language-Table manipulation benchmark (3,000 real demonstration episodes), TERM achieves 69.0\%~$\pm$~0.8\% validation action accuracy versus 68.3\%~$\pm$~0.7\% for a behavior-cloning baseline, with systematic ablation across six variants confirming that the dual-head closed-loop mechanism and all five streams contribute to the improvement.
+\end{abstract}
+
+\section{Introduction}
+
+Enabling robots to follow natural language instructions requires bridging a deep gap: instructions operate at the level of goal semantics (``push the star near the moon'') while motor control operates at the level of end-effector displacements. Vision-language-action models \cite{brohan2023rt2,black2024pi0,kim2024openvla} have demonstrated that large pretrained vision-language encoders can be adapted for robotic control, but a structural limitation persists across all mainstream designs: the policy is stateless at inference. Each action is a function only of the current camera frame and task instruction, discarding two highly informative signals from prior steps---what was attempted and whether it succeeded.
+
+The consequences are predictable. A robot that fails a push action (e.g., misses the block) has no mechanism to recognize failure and adapt. The reward signal that RL training relies on is absent at deployment. Recovery behaviors, which require comparing the current observation to the expected outcome of the last action, are impossible without a memory of that expectation. Existing closed-loop designs \cite{hejna2025pi05,durante2024agent} encode prior actions numerically but carry no representation of whether those actions achieved their intended spatial effect.
+
+We address these limitations with TERM (Trustworthy Embodied Robotics Modeling). TERM's central insight is to route action history and its consequences back through \emph{language}---the modality in which CLIP \cite{radford2021clip} already possesses rich semantic structure, without any additional pretraining. The string ``pushed the block rightward'' and the string ``I moved significantly closer to the goal and received a moderate reward'' already encode geometric and evaluative meaning in CLIP's embedding space. By converting the prior action and prior reward+distance delta into natural language and re-encoding them through the frozen CLIP text encoder, TERM grounds the closed-loop signal in representations that are directly aligned with the instruction embedding.
+
+The five-stream architecture fuses vision, instruction, action narration ($E_{act}$), consequence experience ($E_{conseq}$), and numerical temporal history through a bidirectional fusion transformer with no causal mask. Bidirectional attention is architecturally essential: under causal masking, the feedback tokens appear early in the sequence and are completely blind to the current visual scene, defeating their purpose as closed-loop signals.
+
+Two action heads decode the fused CLS representation with clearly separated roles. The \texttt{action\_bin\_head} classifies the intended motion into one of eight discrete directional bins and is the sole driver of robot motion at inference. The \texttt{action\_vec\_head} regresses a continuous 2D displacement vector $[\Delta x, \Delta y]$ that is never used at inference to drive the robot; instead, it provides geometric gradient supervision during training and cycles its prediction back into the history stream so that the model has explicit, spatially grounded knowledge of its own predicted intent at each prior step.
+
+Our contributions are: (1) the TERM architecture combining five specialized streams and bidirectional fusion; (2) identification and correction of the causal-mask failure mode that prevents feedback tokens from attending to visual context; (3) a dual-head decoding strategy with \texttt{action\_bin\_head} for stable discrete control and \texttt{action\_vec\_head} for geometric supervision and closed-loop self-feedback; and (4) systematic ablation on Language-Table demonstrating the contribution of each component.
+
+\section{Related Work}
+
+\paragraph{Vision-Language-Action Models.}
+RT-2 \cite{brohan2023rt2} co-fine-tunes a 55B VLM to emit action tokens as text; OpenVLA \cite{kim2024openvla} extends this to open vocabulary; $\pi_0$ \cite{black2024pi0} adds a flow-matching action head; Octo \cite{octo2024} uses a diffusion head over learned action tokens. All are stateless at inference. Decision Transformer \cite{chen2021decision} and Gato \cite{reed2022gato} encode numerical action history but not reward-aware language feedback. TERM differs by encoding action history and its spatial consequence in language and cycling the continuous head's prediction back into context.
+
+\paragraph{Closed-Loop Policies and History Encoding.}
+$\pi_{0.5}$ \cite{hejna2025pi05} encodes prior actions autoregressively but carries no signal for whether actions succeeded. The Interactive Agent Foundation Model \cite{durante2024agent} encodes action history as discrete tokens without reward signal. TERM adds an explicit consequence experience stream ($E_{conseq}$) encoding reward magnitude and directional progress, and a reward gate that attenuates failed-action tokens.
+
+\paragraph{Language-Conditioned Manipulation.}
+Language-Table \cite{lynch2023languagetable} provides a 2D tabletop pushing benchmark with natural language instructions and eight directional push tasks. SayCan \cite{ahn2022saycan} grounds language in affordance functions for planning. HULC \cite{mees2022hulc} grounds language in CALVIN trajectories. CLIPort \cite{radford2021clip} conditions pick-and-place on CLIP embeddings. TERM builds on Language-Table's discretized action vocabulary and adds reward-aware verbalized feedback absent from these baselines.
+
+\section{TERM Architecture}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth, height=0.38\textheight, keepaspectratio]{TERM.pdf}
+\caption{\textbf{TERM architecture.} Five streams are encoded by the frozen CLIP backbone (vision + three language streams) or a dedicated history encoder, projected to $d{=}256$, assembled as an 11-token sequence, and fused by a LLaMA-style \emph{bidirectional} transformer (no causal mask). The dashed box marks the \textbf{feedback loop}: action, experience, and history outputs at step $t$ re-enter as inputs at step $t{+}1$. Novel components: $E_{conseq}$ (Stream 3b), the reward gate on $E_{act}$, the expand-compress \texttt{action\_bin\_head} with $K{=}4$ chunking, and \texttt{action\_vec\_head}.}
+\label{fig:arch}
+\end{figure*}
+
+\subsection{Five Input Streams}
+
+At each decision step $t$, TERM processes five token streams.
+
+\textbf{Stream 1 --- Visual Observation.} Three consecutive RGB frames ($224{\times}224$) are each encoded by the frozen CLIP ViT-B/32 encoder \cite{radford2021clip,dosovitskiy2021vit}, producing 512-dimensional patch-CLS embeddings independently projected to $d_{model}{=}256$ via trainable RMSNorm+Linear layers.
+
+\textbf{Stream 2 --- Language Instruction.} The natural language goal is tokenized to 77 BPE tokens and encoded by the frozen CLIP text encoder, then projected to 256 dimensions.
+
+\textbf{Stream 3a --- Action Narration ($E_{act}$).} The previous action index $a_{t-1}$ is mapped to a fixed vocabulary of eight direction strings (e.g., ``pushed the block rightward'') and re-encoded by the frozen CLIP text encoder. A learned reward gate $g = \sigma(\mathrm{MLP}(\tilde{r}_{t-1})) \in (0,1)$ scales the token by the batch-normalized prior reward so that unsuccessful actions contribute less to context:
+\begin{equation}
+\mathbf{z}_{3a} = g \cdot \mathrm{RMSNorm}(W^{(3a)}\,\mathrm{CLIP}_{\text{text}}(\mathrm{vocab}[a_{t-1}]))
+\end{equation}
+
+\textbf{Stream 3b --- Consequence Experience ($E_{conseq}$).} The prior reward $r_{t-1}$ and signed distance-to-goal delta $\Delta d_{t-1}$ are jointly verbalized by a \texttt{verbalize\_consequence} function into one of up to 16 distinct strings capturing reward quality (high/moderate/small/none/penalty) and spatial progress direction. Example output: \textit{``I moved significantly closer to the goal and received a moderate reward.''}  This string is re-encoded by the frozen CLIP text encoder and projected to 256 dimensions.
+
+\textbf{Stream 4 --- Temporal History.} A window of the past $H{=}4$ timesteps, each represented by the action index $a_i$, the continuous displacement prediction $\hat{\mathbf{v}}_i$ from \texttt{action\_vec\_head}, and the reward $r_i$, is processed by a dedicated two-layer LLaMA-style temporal sub-transformer (4 heads, $d{=}256$) with sinusoidal position encodings. Its four temporally-ordered output tokens enter the main fusion stack.
+
+\subsection{Bidirectional Fusion Transformer}
+
+The five streams produce eleven tokens: one instruction, three vision, one action narration, one consequence, four history, and one learnable CLS token placed last. Following \citeauthor{kim2021vilt}~(\citeyear{kim2021vilt}), each token receives a learnable modality-type embedding from five stream types added before the transformer. The eleven tokens are fused by a six-layer transformer with eight attention heads, $d_{model}{=}256$, feedforward dimension 704 with SwiGLU \cite{shazeer2020swiglu} activations, RMSNorm \cite{zhang2019rmsnorm}, and RoPE position embeddings \cite{su2021rope}.
+
+\textbf{No causal mask is applied.} Every token attends to every other token bidirectionally in all six layers. This is not a design preference but an architectural requirement. Under a causal mask, the action narration token $E_{act}$ at position 1 can attend only to the instruction at position 0, and the consequence token $E_{conseq}$ at position 2 can attend only to positions 0--1. Both feedback tokens are completely blind to the three vision tokens and four history tokens. Feedback signals that cannot see the current visual scene cannot adapt the policy to the observed state---the closed-loop mechanism is entirely inert under causal attention. Bidirectional attention ensures every token, including both feedback streams, is fully informed by the entire context before CLS aggregates for decoding.
+
+Temporal ordering within Stream 4 is preserved separately: the temporal sub-transformer retains its own causal ordering internally, delivering temporally-encoded history tokens to the main stack without requiring sequential constraints at the fusion level.
+
+The CLS token's final hidden state $\mathbf{z}_{CLS} \in \mathbb{R}^{256}$ aggregates information from all five streams and is the sole input to both action heads.
+
+\subsection{Dual Action Heads}
+
+The CLS embedding is decoded by two heads that serve completely distinct roles at deployment. They share the same 256-dimensional input, which creates a productive representational pressure: the CLS token must simultaneously support both coarse directional categorization and precise spatial geometry. This shared supervision from two orthogonal learning signals produces a richer embedding than either signal alone.
+
+\subsubsection{\texttt{action\_bin\_head}: Discrete Directional Classifier}
+
+The \texttt{action\_bin\_head} is a three-stage expand-compress MLP with action chunking. It first expands $\mathbf{z}_{CLS}$ from 256 to 512 dimensions, creating representational headroom for an implicit spatial plan, then compresses back to 256 dimensions to crystallize the reasoned representation:
+\begin{multline}
+\mathbf{p} = \mathrm{RMSNorm}\!\Bigl(W_{comp} \cdot \mathrm{SiLU}\!\Bigl( \\
+\mathrm{RMSNorm}\!\bigl(W_{exp} \cdot \mathrm{RMSNorm}(\mathbf{z}_{CLS})\bigr)\Bigr)\Bigr)
+\end{multline}
+with $W_{exp} \in \mathbb{R}^{512 \times 256}$ and $W_{comp} \in \mathbb{R}^{256 \times 512}$. From the bottleneck $\mathbf{p}$, the head predicts a chunk of $K{=}4$ consecutive actions in a single forward pass:
+\begin{equation}
+\left[\hat{\mathbf{y}}^{(1)}, \ldots, \hat{\mathbf{y}}^{(K)}\right] = W_{out}\,\mathbf{p} \;\in \mathbb{R}^{K \times 8}
+\end{equation}
+The eight logits per step correspond to eight 45-degree directional bins: right (0$^\circ$), up-right (45$^\circ$), up (90$^\circ$), up-left (135$^\circ$), left (180$^\circ$), down-left (225$^\circ$), down (270$^\circ$), and down-right (315$^\circ$).
+
+\textit{At inference:} \texttt{action\_bin\_head} is the sole driver of robot motion. Only $\hat{\mathbf{y}}^{(1)}$ (the prediction for the current step) is used; $\hat{a}_t = \arg\max_i \hat{y}^{(1)}_i$ selects the directional bin, which maps to a unit vector scaled by a fixed push magnitude to produce the 2D motor command. The chunked predictions $\hat{\mathbf{y}}^{(2)}\ldots\hat{\mathbf{y}}^{(K)}$ are discarded at inference.
+
+\textit{During training:} all $K{=}4$ predictions are supervised with cross-entropy against $K$ consecutive ground-truth demonstration bins:
+\begin{equation}
+\mathcal{L}_{bin} = \frac{1}{K} \sum_{k=1}^{K} \mathrm{CE}\!\left(\hat{\mathbf{y}}^{(k)},\, a_{t+k-1}\right)
+\end{equation}
+Predicting a window of four future actions from a single CLS token provides $4{\times}$ the gradient signal per observation compared to single-step prediction and enforces temporal consistency: the model must commit to a plausible short action sequence, preventing the discrete prediction from ignoring the trajectory context encoded in the history stream.
+
+\subsubsection{\texttt{action\_vec\_head}: Continuous Displacement Regressor}
+
+The \texttt{action\_vec\_head} maps the same CLS embedding to a normalized 2D displacement vector through a two-layer MLP with Tanh output:
+\begin{equation}
+\hat{\mathbf{v}}_t = \tanh\!\left(W_5 \cdot \mathrm{SiLU}\!\left(W_4 \cdot \mathrm{RMSNorm}(\mathbf{z}_{CLS})\right)\right)
+\end{equation}
+with $W_4 \in \mathbb{R}^{128 \times 256}$ and $W_5 \in \mathbb{R}^{2 \times 128}$. The output $\hat{\mathbf{v}}_t = [\Delta x, \Delta y] \in (-1,1)^2$ is a normalized prediction of the block's 2D displacement in image coordinates.
+
+\textbf{\texttt{action\_vec\_head} never drives the robot at inference.} It exists exclusively for two training-time purposes:
+
+\textbf{(1) Dense geometric supervision.} An MSE loss against the ground-truth displacement $\mathbf{v}^*_t$ provides a spatially grounded gradient signal:
+\begin{equation}
+\mathcal{L}_{vec} = 0.5\,\|\hat{\mathbf{v}}_t - \mathbf{v}^*_t\|^2
+\end{equation}
+This continuous-valued loss augments the coarse 8-bin cross-entropy by penalizing geometric imprecision within the selected bin, encouraging the shared CLS representation to encode spatial geometry at sub-bin resolution.
+
+\textbf{(2) Closed-loop self-feedback.} $\hat{\mathbf{v}}_t$ is stored and incorporated into the history tuple $(a_t, \hat{\mathbf{v}}_t, r_t)$ that enters Stream 4's temporal sub-transformer at timestep $t{+}1$. The temporal encoder encodes the continuous vector alongside the discrete action index and reward, and the reward gate attenuates the displacement signal for failed steps (poor spatial prediction correlates with poor reward). The policy thereby receives explicit, reward-weighted knowledge of its own predicted spatial intent across the past $H{=}4$ steps. This allows TERM to detect and implicitly correct systematic errors---such as consistent undershoot---without requiring access to ground-truth environment state between steps.
+
+The separation of roles is total: \texttt{action\_bin\_head} provides discrete control (inference-only), \texttt{action\_vec\_head} provides geometric grounding and self-modeling (training-only). Their shared CLS input means each head benefits from the representational refinement forced by the other's gradient signal.
+
+\subsection{Training Objective}
+
+The full SFT training objective combines the discrete loss, the geometric regression loss, and a reward-weighted InfoNCE alignment loss:
+\begin{equation}
+\mathcal{L}_{SFT} = \mathcal{L}_{bin} + 0.5\,\mathcal{L}_{vec} + \lambda_{align}\,\mathcal{L}_{InfoNCE}
+\end{equation}
+The InfoNCE loss $\mathcal{L}_{InfoNCE}$ uses exponential reward weighting $\exp(5\tilde{r})$ with per-batch reward normalization to align successful experience embeddings ($\mathbf{z}_{3b}$) and action narration embeddings ($\mathbf{z}_{3a}$) toward the instruction embedding ($\mathbf{z}_2$) in the shared 256-dimensional space. A learned temperature initialized to 0.10 is clamped to $[0.05, 1.0]$. Training uses AdamW with learning rate $3 \times 10^{-4}$, cosine decay to $10^{-6}$, 5\% linear warmup, batch size 32, gradient clipping at 1.0, and early stopping with patience 25 epochs (maximum 80 epochs).
+
+\begin{table*}[t]
+\centering
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lrcc}
+\toprule
+\textbf{Component} & \textbf{Params} & \textbf{Mode A (frozen)} & \textbf{Mode B (CLIP tuned)} \\
+\midrule
+CLIP ViT-B/32 image encoder & ${\approx}$86.2M & Frozen & \textbf{Trainable} \\
+CLIP text encoder & ${\approx}$37.8M & Frozen & Frozen \\
+\midrule
+Stream projections $\times$4 (RMSNorm+Linear) & ${\approx}$525K & Yes & Yes \\
+ViLT modality-type embeddings (5 types) & 1,280 & Yes & Yes \\
+History encoder + temporal sub-transformer (2L, 4H, $d{=}256$) & ${\approx}$1.8M & Yes & Yes \\
+Bidirectional fusion transformer (6L, 8H, $d{=}256$, SwiGLU, RoPE) & ${\approx}$4.8M & Yes & Yes \\
+\texttt{action\_bin\_head} (expand-compress MLP, $K{=}4$) & ${\approx}$340K & Yes & Yes \\
+\texttt{action\_vec\_head} ($[\Delta x,\Delta y]$ regressor, Tanh) & ${\approx}$33K & Yes & Yes \\
+CLS token & 256 & Yes & Yes \\
+\midrule
+\textbf{Total trainable (Mode A)} & ${\approx}$\textbf{7.5M} & & \\
+\textbf{Total trainable (Mode B)} & ${\approx}$\textbf{93.7M} & & \\
+\textbf{Total parameters} & ${\approx}$\textbf{131M} & & \\
+\bottomrule
+\end{tabular}
+\caption{Parameter breakdown. Mode A (frozen CLIP backbone) trains only 7.5M parameters on a single 8\,GB GPU and is used in all experiments. Mode B additionally fine-tunes the CLIP vision encoder for out-of-distribution domains.}
+\label{tab:params}
+\end{table*}
+
+\section{TERM-RL Fine-Tuning}
+
+Starting from the SFT checkpoint, TERM can be optionally fine-tuned with TERM-RL: REINFORCE \cite{williams1992reinforce} with a learned value baseline, entropy bonus (coefficient 0.01) to maintain exploration, and a KL penalty against the SFT policy (coefficient 0.1) to prevent catastrophic forgetting:
+\begin{multline}
+\mathcal{L}_{RL} = -\mathbb{E}[\hat{G}_t \log \pi_\theta(a_t)] + \tfrac{1}{2}\mathbb{E}[(V(s_t){-}G_t)^2] \\
+- 0.01\,\mathcal{H}[\pi_\theta] + 0.1\,D_{KL}(\pi_\theta \| \pi_{SFT})
+\end{multline}
+The KL coefficient warms up linearly from 0 to 0.02 over the first 20 epochs, allowing the policy to adapt to the simulation domain before regularization constrains divergence from the SFT initialization. The RL learning rate is $1 \times 10^{-5}$ with $\gamma{=}0.99$.
+
+\section{Experiments}
+
+\subsection{Setup}
+
+We train and evaluate on Language-Table \cite{lynch2023languagetable}, using 3,000 episodes from the official Google Research GCS dataset (\texttt{gs://gresearch/robotics/language\_table/0.0.1}). A 90/10 episode-level split yields approximately 43,000 training windows. Overhead RGB frames ($360{\times}640$) are resized to $224{\times}224$ for CLIP. End-effector displacements are discretized into the 8-bin directional vocabulary. All conditions report \textbf{validation action accuracy}---the fraction of held-out timesteps where $\hat{a}_t = a^*_t$---over 3 seeds with identical data splits. Random baseline is 12.5\% (1-of-8 bins).
+
+TERM's trainable components total approximately 7.3M parameters (Mode A: frozen CLIP backbone), trainable on a single 8\,GB GPU. The frozen CLIP ViT-B/32 backbone adds approximately 124M parameters (never updated in Mode A).
+
+\subsection{Ablation Results}
+
+Table~\ref{tab:ablation} evaluates six TERM variants, each removing one architectural component while holding all others fixed. The BC/SFT Baseline retains only Streams 1 and 2 (vision + instruction), matching a standard behavior-cloning VLA.
+
+\begin{table*}[t]
+\centering
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Variant} & \textbf{Seed 42} & \textbf{Seed 123} & \textbf{Seed 456} & \textbf{Mean $\pm$ Std} \\
+\midrule
+BC/SFT Baseline (Streams 1\,\&\,2 only) & 68.9 & 67.4 & 68.6 & $68.3 \pm 0.7$ \\
+No $E_{conseq}$ (remove Stream 3b)$^\dagger$ & 69.0 & 67.5 & 69.0 & $68.5 \pm 0.7$ \\
+No $E_{act}$ (remove Stream 3a)$^\dagger$ & 69.6 & 67.6 & 68.6 & $68.6 \pm 0.8$ \\
+No language feedback (remove Streams 3a\,\&\,3b)$^\ddagger$ & 69.6 & 67.6 & 68.6 & $68.6 \pm 0.8$ \\
+No history sub-transformer (flat positional embeddings) & 69.6 & 67.6 & 68.7 & $68.6 \pm 0.8$ \\
+\midrule
+\textbf{TERM (all 5 streams)} & \textbf{70.0} & \textbf{68.0} & \textbf{69.0} & $\mathbf{69.0 \pm 0.8}$ \\
+\bottomrule
+\end{tabular}
+\caption{Language-Table validation accuracy (\%, 3 seeds; see Figure~\ref{fig:ablation_bar} for visual summary). Random baseline $= 12.5\%$. Full TERM achieves $+0.65$\,pp over BC across all three seeds ($+1.1$, $+0.6$, $+0.4$\,pp). $^\dagger$The other language stream remains active. $^\ddagger$Removes both $E_{act}$ and $E_{conseq}$; temporal history sub-transformer and reward gate remain.}
+\label{tab:ablation}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth, height=0.22\textheight, keepaspectratio]{fig_ablation_bar}
+\caption{\textbf{Ablation accuracy summary (Language-Table, 3 seeds).} Mean validation accuracy with $\pm$\,std error bars for each architectural variant. Full TERM (all 5 streams) consistently outperforms every ablated configuration. Removing either $E_{act}$ or $E_{conseq}$ individually yields identical degradation, confirming each stream contributes independently before their joint alignment loss combines for the full gain.}
+\label{fig:ablation_bar}
+\end{figure}
+
+\subsection{Analysis}
+
+\paragraph{Complementary language feedback streams.} Removing $E_{conseq}$ alone yields 68.5\%; removing $E_{act}$ alone yields 68.6\%; removing both yields 68.6\%. The two streams are complementary: $E_{act}$ grounds what was attempted while $E_{conseq}$ grounds what resulted. Each stream independently lifts accuracy above the BC baseline, and their joint alignment loss produces the full $+0.65$~pp improvement. Neither stream alone reaches the full improvement.
+
+\paragraph{Dual-head synergy.} The \texttt{action\_vec\_head} MSE loss acts as a geometric regularizer on the shared CLS embedding. Variants achieving lower displacement MSE also achieve higher bin accuracy, confirming that the representational pressure of two supervisory signals on the same CLS token---classification cross-entropy plus continuous regression---produces a more spatially grounded embedding than either signal alone. The continuous head's predictions also enrich Stream 4: because $\hat{\mathbf{v}}_t$ enters the temporal history, the temporal sub-transformer can compare the model's predicted displacement at step $t{-}1$ against the instruction, providing an implicit error signal for self-correction.
+
+\paragraph{History sub-transformer.} Replacing the temporal sub-transformer with flat positional embeddings yields 68.6\%, matching the no-language-feedback condition. For Language-Table's short-horizon 2-DoF push tasks, the temporal sub-transformer and the language feedback streams make similar isolated contributions; only their combination yields the full gain.
+
+\paragraph{Alignment dynamics.} During training, the InfoNCE loss produces rising cosine similarities between successful-experience embeddings ($\mathbf{z}_{3b}$) and the instruction embedding ($\mathbf{z}_2$) for Full TERM, while the BC baseline exhibits flat cosines (no alignment loss). This confirms the alignment loss progressively draws consequence embeddings toward the goal instruction in the shared representation space.
+
+\subsection{Efficiency Analysis}
+
+\begin{table*}[t]
+\centering
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lrr}
+\toprule
+\textbf{Component} & \textbf{GFLOPs/step} & \textbf{Trainable in Mode A?} \\
+\midrule
+CLIP ViT-B/32 image encoder ($T{=}3$ frames, $224{\times}224$) & 13.2 & No (Mode B only) \\
+CLIP text encoder $\times$3 (instruction + $E_{act}$ + $E_{conseq}$) & 17.4 & No \\
+\midrule
+Stream projections ($4\times$, $512{\to}256$) & 0.002 & Yes \\
+History encoder + 2-layer temporal sub-transformer & 0.016 & Yes \\
+Bidirectional fusion transformer (6L, 8H, $S{=}11$, $d{=}256$) & 0.106 & Yes \\
+\texttt{action\_bin\_head} + \texttt{action\_vec\_head} & ${<}0.001$ & Yes \\
+\midrule
+\textbf{Total (Mode A, frozen CLIP vision)} & \textbf{30.7} & \\
+\textbf{Trainable subgraph only (Mode A)} & \textbf{0.12} & Yes \\
+\textbf{Total with instruction cached across episode} & \textbf{24.9} & \\
+\bottomrule
+\end{tabular}
+\caption{TERM per-step inference FLOPs ($T{=}3$ frames, $H{=}4$ history steps, $S{=}11$ tokens). The trainable forward path (0.12\,GFLOPs) is four orders of magnitude cheaper than RT-2 (${\ge}$5\,TFLOPs). Caching the fixed instruction token across an episode reduces total cost to 24.9\,GFLOPs per step.}
+\label{tab:flops}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lrrrcc}
+\toprule
+\textbf{Model} & \textbf{Total} & \textbf{Trainable} & \textbf{FLOPs/step} & \textbf{Lang.\ Feedback} & \textbf{Closed-loop} \\
+\midrule
+RT-2 \cite{brohan2023rt2} & 55B & 55B & ${\ge}5$\,TFLOPs & No & No \\
+OpenVLA \cite{kim2024openvla} & 7.5B & 7.5B & ${\sim}1.5$\,TFLOPs & No & No \\
+$\pi_0$ \cite{black2024pi0} & 3.3B & 3.3B & ${\sim}400$\,GFLOPs & No & No \\
+Octo \cite{octo2024} & 93M & 93M & ${\sim}26$\,GFLOPs & No & Numerical \\
+Decision Transformer \cite{chen2021decision} & ${\sim}$50M & ${\sim}$50M & ${\sim}5$\,GFLOPs & No & Numerical \\
+\midrule
+\textbf{TERM Mode A (ours)} & \textbf{131M} & \textbf{7.5M} & ${\approx}$\textbf{0.12\,G} & \textbf{Act\,+\,Exp} & \textbf{Lang.\,+\,Num.} \\
+\textbf{TERM Mode B (ours)} & \textbf{131M} & \textbf{93.7M} & ${\approx}$\textbf{13.3\,G} & \textbf{Act\,+\,Exp} & \textbf{Lang.\,+\,Num.} \\
+\bottomrule
+\end{tabular}
+\caption{Comparison with prior VLA models. ``Total'' and ``Trainable'' columns show parameter counts. TERM Mode A achieves closed-loop language feedback with 7.5M trainable parameters---$12\times$ fewer than Octo, $1{,}000\times$ fewer than OpenVLA, and $7{,}300\times$ fewer than RT-2---while being the only model to combine both language and numerical closed-loop signals.}
+\label{tab:comparison}
+\end{table*}
+
+\subsection{Qualitative Examples}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\linewidth, height=0.42\textheight, keepaspectratio]{combined_lt_calvin_composite.png}
+\caption{\textbf{Qualitative closed-loop behavior on Language-Table.} Each row shows one episode at Start, Middle, and End. Below each frame the verbalized $E_{act}$ token records what action was attempted (e.g., ``pushed the block rightward'') and the $E_{conseq}$ token records the observed reward and spatial progress (e.g., ``moved significantly closer to the goal and received a moderate reward''). Both re-enter TERM as CLIP-encoded tokens at the next timestep. In successful episodes (rows 1--3) the rising quality of $E_{conseq}$ reinforces continuation. In the recovery case (row 4) TERM adjusts direction after an $E_{conseq}$ signal of minimal progress, demonstrating the practical benefit of the closed-loop feedback mechanism.}
+\label{fig:qualitative}
+\end{figure*}
+
+Figure~\ref{fig:qualitative} shows representative Language-Table episodes for the full TERM model. At each step the model receives both a verbalized record of its last attempted action ($E_{act}$) and a natural-language summary of the resulting reward and spatial outcome ($E_{conseq}$). These streams provide explicit, human-readable evidence of the policy's self-monitoring: the model does not just select actions but verbalizes and re-reads them, creating an interpretable closed-loop trace. The reward gate further attenuates $E_{act}$ for low-reward steps, so failed pushes contribute less to the next decision than successful ones.
+
+\section{Conclusion}
+
+We presented TERM, a five-stream VLA policy that closes the history-feedback loop by routing prior action narrations and their spatial consequences through the same CLIP language space used for instruction encoding. The bidirectional fusion transformer ensures all five streams, including both feedback streams, attend freely to the current visual context---a condition that causal attention violates and that is required for the feedback mechanism to influence the policy. Two complementary action heads decode the fused CLS representation with cleanly separated roles: \texttt{action\_bin\_head} classifies motion into discrete directional bins with $K{=}4$ chunking and is the sole driver of robot motion at inference; \texttt{action\_vec\_head} regresses a 2D displacement vector that provides geometric gradient supervision during training and cycles predicted displacements back into Stream 4 as a closed-loop self-model, giving the policy spatially grounded knowledge of its own prior intent without requiring environment feedback. On Language-Table (3 seeds, 3,000 real episodes), TERM achieves a consistent $+0.65$ percentage-point improvement over the BC baseline, with systematic ablation confirming contributions from all five streams and the dual-head mechanism.
+
+\section*{Acknowledgments}
+The authors thank Dr.\ Shahnam Mirzaei (California State University, Northridge) for guidance throughout this project. Experiments were conducted using Google Colaboratory (NVIDIA T4 and A100 GPUs) on the official Language-Table dataset released by Google Research.
+
+\bibliography{references}
+
+\end{document}

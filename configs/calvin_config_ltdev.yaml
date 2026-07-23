@@ -1,0 +1,93 @@
+# VERA on CALVIN task_D_D — mirrors Language-Table **dev** recipe that worked better:
+#   vera.alignment_loss_coef:    0.05  (was 0.10 in calvin_config.yaml)
+#   vera.regression_loss_coef:   0.25  (was 0.50)
+#   early_stopping_patience:    15     (was 10)
+#   num_workers:                 2     (match LT dev; increase if I/O bound)
+# Same as LT dev otherwise: epochs 100, batch 32, lr 3e-4, val 20%, eval 100 eps.
+
+model:
+  num_actions:    14
+  history_len:    4
+  num_vis_frames: 3
+  fusion_layers:  6
+  fusion_heads:   8
+  d_model:        256
+  d_ff_scale:     4
+  dropout:        0.1
+  freeze_clip:    true              # start from frozen CLIP…
+  unfreeze_clip_vision: true         # …then fine-tune ViT-B/32 vision only (text stays frozen)
+  # Optional: clip_vision_lr defaults to 5% of training.lr in sft_trainer_vera
+  action_dim:     7
+  chunk_size:     1           # single-step BC + embodied rollout (K>1 needs chunk rollout)
+
+vera:
+  use_lang_feedback:      true    # legacy alias for use_action_lang_feedback
+  use_action_lang_feedback: true  # Stream 3a — action narration token
+  use_temporal_history:   true
+  use_reward_gate:        true
+  use_consequence_token:  true    # Stream 3b — outcome narration (independent of 3a)
+  use_step_conditioning:  true    # VLAConf-style phase FiLM on E_act / E_exp tokens
+  step_horizon:           50      # match rl.max_episode_steps (fixed K at inference)
+  alignment_loss_coef:    0.05
+  regression_loss_coef:   0.25
+
+  action_vocab:
+    0:  "I moved the end-effector to the right"
+    1:  "I moved the end-effector to the left"
+    2:  "I moved the end-effector forward"
+    3:  "I moved the end-effector backward"
+    4:  "I moved the end-effector upward"
+    5:  "I moved the end-effector downward"
+    6:  "I rotated the wrist clockwise"
+    7:  "I rotated the wrist counterclockwise"
+    8:  "I pitched the end-effector forward"
+    9:  "I pitched the end-effector backward"
+    10: "I yawed the end-effector to the left"
+    11: "I yawed the end-effector to the right"
+    12: "I opened the gripper"
+    13: "I closed the gripper"
+
+data:
+  episodes_path:    null
+  dataset_type:     calvin
+  calvin_split:     training
+  img_size:         224
+
+training:
+  device:                   auto
+  epochs:                   100
+  seed:                     42
+  early_stopping_patience:  15
+  batch_size:               32
+  lr:                       3e-4
+  lr_min:                   1e-6
+  weight_decay:             1e-4
+  label_smoothing:          0.05
+  grad_clip:                1.0
+  val_fraction:             0.2
+  split_seed:               42
+  num_workers:              2
+  closed_loop_dropout:      0.35   # match closed-loop rollout (zero history augmentation)
+  log_every_batches:        200   # progress during long epochs (0 = off)
+  save_every:               10
+  output_dir:               checkpoints/calvin_ltdev/
+
+rl:
+  epochs:            200
+  num_rollouts:      4
+  max_episode_steps: 50
+  gamma:             0.99
+  lr:                1e-5
+  weight_decay:      1e-4
+  grad_clip:         1.0
+  entropy_coef:      0.01
+  vf_coef:           0.5
+  kl_coef:           0.1
+
+env:
+  env_id:      dummy
+  instruction: "complete the manipulation task"
+
+eval:
+  num_episodes:      100
+  success_threshold: 1.0

@@ -1,0 +1,39 @@
+% Paste into Section~\ref{sec:experiments}, Environments and Datasets (after CALVIN D→D paragraph).
+% Requires: \usepackage{url} or \usepackage{hyperref}
+
+\paragraph{One-gigabyte CALVIN subset for online Colab visualization.}
+The full CALVIN D$\to$D release occupies ${\sim}$170\,GB compressed and
+${\sim}$170\,GB unpacked on disk, which is impractical for interactive
+demonstrations in Google Colaboratory.
+For \emph{online} visualization---stepping a trained \modelname\ checkpoint on
+live RGB observations, overlaying predicted gripper motion, and inspecting
+language-conditioned attention without re-downloading the training corpus---we
+ship a curated subset of approximately \textbf{1\,GB}.
+The pack is built from the official \texttt{validation} split
+(\texttt{task\_D\_D/validation/}), which already matches the CALVIN long-horizon
+evaluation protocol.
+Each language-annotated segment spans ${\sim}$50--65 frames at 3\,fps; at
+${\sim}$280\,KB per frame file, roughly \textbf{60 episodes}
+(${\sim}$3\,600 \texttt{episode\_*.npz} files) fit under the 1\,GB budget while
+preserving diverse tasks (lift, push, open drawer, etc.).
+The archive includes a trimmed \texttt{lang\_annotations/auto\_lang\_ann.npy}
+so \texttt{load\_calvin()} in our codebase resolves natural-language instructions
+unchanged.
+Researchers with the full dataset locally can regenerate the pack with
+\begin{verbatim}
+python scripts/pack_calvin_colab_viz_subset.py \
+    --calvin_path $CALVIN_ROOT/task_D_D \
+    --split validation --target_bytes 1000000000 \
+    --out calvin_colab_viz_1gb
+tar -czf calvin_colab_viz_1gb.tar.gz calvin_colab_viz_1gb
+\end{verbatim}
+and upload the tarball to Google Drive.
+In Colab, mount Drive, extract under \texttt{/content/calvin\_colab\_viz\_1gb},
+set \texttt{data.episodes\_path} to that directory and
+\texttt{data.dataset\_type: calvin}, then run a short inference cell that loads
+\texttt{best\_sft\_vera.pt}, samples sliding windows from one episode, and
+displays \texttt{rgb\_static} frames with the model's discrete 14-way action and
+7-DoF regression vector.
+This subset is \textbf{not} used for reporting benchmark numbers in
+Table~\ref{tab:ablation_status}; full training and 1{,}000-sequence rollouts use
+the complete D$\to$D training and validation corpora.

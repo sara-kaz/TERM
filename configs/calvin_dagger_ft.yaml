@@ -1,0 +1,66 @@
+# Finetune on expert demos + DAgger rollouts (policy states, expert rel_actions).
+
+model:
+  num_actions:    14
+  history_len:    4
+  num_vis_frames: 3
+  fusion_layers:  6
+  fusion_heads:   8
+  d_model:        256
+  d_ff_scale:     4
+  dropout:        0.1
+  freeze_clip:    true
+  unfreeze_clip_vision: false
+  action_dim:     7
+  proprio_dim:    15
+
+vera:
+  use_lang_feedback:      true
+  use_temporal_history:   true
+  use_reward_gate:        true
+  use_consequence_token:  true
+  alignment_loss_coef:    0.02
+  regression_loss_coef:   2.5
+  action_vocab:
+    0:  "I moved the end-effector to the right"
+    1:  "I moved the end-effector to the left"
+    2:  "I moved the end-effector forward"
+    3:  "I moved the end-effector backward"
+    4:  "I moved the end-effector upward"
+    5:  "I moved the end-effector downward"
+    6:  "I rotated the wrist clockwise"
+    7:  "I rotated the wrist counterclockwise"
+    8:  "I pitched the end-effector forward"
+    9:  "I pitched the end-effector backward"
+    10: "I yawed the end-effector to the left"
+    11: "I yawed the end-effector to the right"
+    12: "I opened the gripper"
+    13: "I closed the gripper"
+
+data:
+  dataset_type:     calvin
+  calvin_split:     training
+  img_size:         224
+  use_gripper_cam:  true
+  proprio_stats_path: data/calvin_proprio_stats.json
+  dagger_episodes_pkl: checkpoints/calvin_dagger/seed123/dagger_episodes.pkl
+
+training:
+  finetune:                 true
+  device:                   auto
+  epochs:                   15
+  seed:                     123
+  early_stopping_patience:  5
+  batch_size:               32
+  lr:                       2e-5
+  lr_min:                   1e-6
+  weight_decay:             1e-4
+  label_smoothing:          0.05
+  grad_clip:                1.0
+  val_fraction:             0.2
+  num_workers:              4
+  log_every_batches:        200
+  save_every:               3
+  output_dir:               checkpoints/calvin_dagger_ft/seed123/
+
+warmstart: checkpoints/calvin_continuous/seed123/best_sft_vera.pt

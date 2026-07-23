@@ -1,0 +1,29 @@
+# Core
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# CLIP (OpenAI) — install from source
+# pip install git+https://github.com/openai/CLIP.git
+# clip is listed here as a reminder; the above command handles installation
+
+# Config & utilities
+pyyaml>=6.0
+tqdm>=4.66.0
+
+# Robotics environments
+pybullet>=3.2.6          # Language-Table physics backend
+gym>=0.26.0
+
+# CALVIN (optional — only needed for CALVIN benchmark)
+# See: https://github.com/mees/calvin for installation instructions
+
+# Evaluation & plotting
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=2.0.0
+
+# Notebook support (optional)
+jupyter>=1.0.0
+ipywidgets>=8.0.0

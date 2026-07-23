@@ -1,0 +1,100 @@
+# ── VERA — CALVIN D→D Configuration ──────────────────────────────────────────
+# Drop-in config for training VERA on CALVIN task_D_D split.
+# Matches partner's Language-Table hyperparameters exactly for fair comparison:
+#   same d_model, fusion depth, dropout, lr, batch_size, seeds, val_fraction.
+# Only dataset-specific keys differ (num_actions, action_dim, paths, vocab).
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  num_actions:    14          # 14 direction-aware bins:
+                              #   0=x+ 1=x- 2=y+ 3=y- 4=z+ 5=z-
+                              #   6=roll+ 7=roll- 8=pitch+ 9=pitch-
+                              #   10=yaw+ 11=yaw- 12=gripper_open 13=gripper_close
+  history_len:    4           # number of (action, reward) history steps — matches LT
+  num_vis_frames: 3           # 3 RGB frames per observation — matches LT
+  fusion_layers:  6           # causal fusion transformer depth — matches LT
+  fusion_heads:   8           # attention heads — matches LT
+  d_model:        256         # shared embedding dimension — matches LT
+  d_ff_scale:     4           # feedforward dim = d_model * d_ff_scale — matches LT
+  dropout:        0.1         # matches LT
+  freeze_clip:    true        # freeze first, then selectively unfreeze vision below
+  unfreeze_clip_vision: true   # ViT-B/32 image encoder trainable; text encoder stays frozen
+  action_dim:     7           # 7-DoF [x, y, z, roll, pitch, yaw, gripper] ∈ [-1,1]⁷
+
+# ── VERA-Specific Settings ─────────────────────────────────────────────────────
+vera:
+  use_lang_feedback:      true
+  use_action_lang_feedback: true
+  use_temporal_history:   true
+  use_reward_gate:        true
+  use_consequence_token:  true
+
+  alignment_loss_coef:    0.1   # matches LT
+  regression_loss_coef:   0.5   # matches LT
+
+  # 14-bin direction-aware CALVIN action vocabulary.
+  # Axes: 0=x, 1=y, 2=z, 3=roll, 4=pitch, 5=yaw; even=positive, odd=negative.
+  action_vocab:
+    0:  "I moved the end-effector to the right"
+    1:  "I moved the end-effector to the left"
+    2:  "I moved the end-effector forward"
+    3:  "I moved the end-effector backward"
+    4:  "I moved the end-effector upward"
+    5:  "I moved the end-effector downward"
+    6:  "I rotated the wrist clockwise"
+    7:  "I rotated the wrist counterclockwise"
+    8:  "I pitched the end-effector forward"
+    9:  "I pitched the end-effector backward"
+    10: "I yawed the end-effector to the left"
+    11: "I yawed the end-effector to the right"
+    12: "I opened the gripper"
+    13: "I closed the gripper"
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  episodes_path:    null          # ← SET THIS: path to task_D_D root dir
+                                  #   e.g. /data/calvin/task_D_D
+  dataset_type:     calvin
+  calvin_split:     training
+  img_size:         224           # matches LT
+
+# ── Training ─────────────────────────────────────────────────────────────────
+training:
+  device:                   auto  # "cuda" | "mps" | "cpu" | "auto"
+  epochs:                   100   # max epochs; early stopping will trigger before this
+  early_stopping_patience:  10    # stop if val_acc doesn't improve for 10 epochs
+                                  # partner uses same patience — fair comparison
+  batch_size:               32    # matches LT
+  lr:                       3e-4  # matches LT
+  lr_min:                   1e-6  # matches LT
+  weight_decay:             1e-4  # matches LT
+  label_smoothing:          0.05  # matches LT
+  grad_clip:                1.0   # matches LT
+  closed_loop_dropout:      0.35   # zero history aug — matches closed-loop rollout
+  val_fraction:             0.2   # 20% held-out for val — matches LT
+  num_workers:              4
+  save_every:               10
+  output_dir:               checkpoints/calvin/
+
+# ── RL (not used in SFT phase) ────────────────────────────────────────────────
+rl:
+  epochs:            200
+  num_rollouts:      4
+  max_episode_steps: 50
+  gamma:             0.99
+  lr:                1e-5
+  weight_decay:      1e-4
+  grad_clip:         1.0
+  entropy_coef:      0.01
+  vf_coef:           0.5
+  kl_coef:           0.1
+
+# ── Environment ────────────────────────────────────────────────────────────────
+env:
+  env_id:      dummy
+  instruction: "complete the manipulation task"
+
+# ── Evaluation ─────────────────────────────────────────────────────────────────
+eval:
+  num_episodes:      100           # 100 rollouts for final success rate
+  success_threshold: 1.0

@@ -1,0 +1,843 @@
+%% ============================================================================
+%%  VERA: Vision-Experience-Reasoning-Action — NeurIPS 2026 Submission
+%%  Authors: Sara Aly
+%% ============================================================================
+\documentclass{article}
+
+\PassOptionsToPackage{numbers,compress}{natbib}
+\usepackage[preprint]{neurips_2026}
+
+%% ── Encoding & fonts ─────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{inconsolata}
+
+%% ── Math ─────────────────────────────────────────────────────────────────────
+\usepackage{amsmath,amssymb,amsfonts,mathtools,amsthm}
+
+%% ── Figures ──────────────────────────────────────────────────────────────────
+\usepackage{graphicx,wrapfig,float,subcaption,adjustbox}
+
+%% ── Tables ───────────────────────────────────────────────────────────────────
+\usepackage{booktabs,multirow,tabularx,array,colortbl,makecell}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.25}
+
+%% ── Text & lists ─────────────────────────────────────────────────────────────
+\usepackage{nicefrac,microtype,enumitem,scalefnt,xspace}
+
+%% ── Colour ───────────────────────────────────────────────────────────────────
+\usepackage{xcolor}
+\definecolor{uclablue}{rgb}{0.15,0.45,0.68}
+\definecolor{CodeBg}{HTML}{F8F9FA}
+\definecolor{BorderGray}{HTML}{D1D5DB}
+\definecolor{NewOrange}{HTML}{E67E22}
+
+%% ── Hyperlinks ───────────────────────────────────────────────────────────────
+\usepackage{hyperref,url}
+\hypersetup{breaklinks,colorlinks,
+  citecolor=uclablue,linkcolor=uclablue,urlcolor=uclablue}
+
+%% ── References & cross-refs ──────────────────────────────────────────────────
+\usepackage{natbib}
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%% ── Listings ─────────────────────────────────────────────────────────────────
+\usepackage{listings,pifont}
+\lstdefinestyle{mycode}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{CodeBg},
+  frame=single, rulecolor=\color{BorderGray},
+  breaklines=true, showstringspaces=false,
+  aboveskip=4pt, belowskip=4pt,
+}
+\lstset{style=mycode}
+
+%% ── Macros ───────────────────────────────────────────────────────────────────
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
+\newcommand{\modelname}{\textsc{VERA}\xspace}
+\newcommand{\Lact}{$E_{\mathrm{act}}$\xspace}
+\newcommand{\Lexp}{$E_{\mathrm{exp}}$\xspace}
+\newcommand{\Lcon}{\Lexp}
+\newcommand{\NEW}{\textcolor{NewOrange}{\textbf{[new]}}\xspace}
+\newcommand{\tbd}{\textit{---}\xspace}
+\newcommand{\veraresult}[2]{$#1\,{\pm}\,#2$}  %% e.g. \veraresult{51.4}{1.9}
+
+%% ============================================================================
+\title{\textbf{VERA}: Closed-Loop Feedback for\\
+       Grounded Vision-Action Policies via Experience and Reasoning}
+
+\author{Sara Aly \\
+  Department of Computer Science \\
+  California State University, Northridge \\
+  \texttt{sarakhaledsea@gmail.com}}
+
+\begin{document}
+\maketitle
+
+%% ============================================================================
+\begin{abstract}
+Standard Vision-Language-Action (VLA) models treat each decision as a
+stateless function of the current camera frame and task instruction,
+discarding two informative signals that arise from prior interaction:
+\emph{(i)} what action the agent attempted at the previous step, and
+\emph{(ii)} whether that action moved it closer to the goal.
+We present \modelname\ (Vision-Experience-Reasoning-Action), a
+five-stream closed-loop robot policy that continuously re-injects both
+signals back into the decision process.
+The previous action is narrated from a fixed vocabulary and
+re-encoded as an action narration token \Lact\ through the frozen CLIP
+encoder, gated by the received reward so successful actions speak
+louder than failed ones.
+The observed outcome---reward and signed distance-to-goal delta---is
+jointly verbalized into one of up to 16 semantically distinct strings
+and re-encoded as an experience token \Lexp\ \NEW, capturing
+\emph{what happened} orthogonally to \emph{what was attempted}.
+A rolling window of low-level continuous action vectors, discrete
+indices, and rewards forms a fifth history stream processed by a
+dedicated temporal transformer.
+A parallel continuous regression head co-trained with MSE enables
+direct end-effector command prediction alongside the discrete policy.
+All five streams are fused by a six-layer LLaMA-style causal
+Transformer (RMSNorm + RoPE + SwiGLU) augmented with ViLT
+modality-type embeddings.
+An auxiliary reward-weighted InfoNCE loss aligns successful experience
+embeddings toward the goal instruction during training.
+With only $\approx\!4.2$M trainable parameters atop a frozen
+$\approx\!128$M CLIP backbone, \modelname\ trains on a single 8\,GB GPU.
+On Language-Table~\citep{lynch2023languagetable}, a language-conditioned
+tabletop manipulation benchmark, \modelname\ achieves
+$51.4\%\,(\pm1.9\%)$ validation accuracy versus $50.8\%\,(\pm1.8\%)$
+for a strong behavioural-cloning baseline (3 seeds);
+the critical no-language-feedback ablation is in progress on both
+Language-Table and CALVIN D$\to$D~\citep{mees2022calvin}, with the
+full nine-variant ablation study spanning both environments.
+\end{abstract}
+
+%% ============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Long-horizon robot manipulation requires recovering from failures.
+If a grasp fails, the robot must recognise that it has failed and adapt
+its next action accordingly.
+State-of-the-art VLA models---RT-2~\citep{brohan2023rt2} (55B),
+Octo~\citep{octo2024} (93M), OpenVLA~\citep{kim2024openvla} (7B),
+and $\pi_0$~\citep{black2024pi0}---are \emph{stateless} at inference:
+each decision is a function only of the current frame and instruction.
+Two failure modes follow directly.
+\textbf{No recovery signal}: repeated failed actions are
+indistinguishable from first attempts.
+\textbf{No consequence grounding}: RL training maximises reward, but the
+reward---and the spatial change it reflects---is discarded at test time.
+
+\paragraph{Our approach.}
+Rather than encoding the action-reward history as raw numerical tokens, we
+route it through \emph{language}---the same modality CLIP was pretrained
+on.
+This exploits CLIP's preexisting semantic structure with no additional
+pretraining: the string ``\emph{The action was successful}'' already
+lives near ``\emph{pick up the object}'' in CLIP's 512-dim text space.
+We introduce two complementary feedback tokens (Figure~\ref{fig:arch}):
+
+\begin{itemize}[leftmargin=1.5em,itemsep=2pt]
+\item \textbf{\Lact\ — Action Narration Token} (Stream~3a): previous action
+  index $\to$ fixed vocabulary string $\to$ frozen CLIP encoder.
+  A reward gate $\sigma(\mathrm{MLP}(r_{t-1}))\!\in\!(0,1)$ attenuates
+  the token for failed steps.
+\item \textbf{\Lexp\ — Experience Token} (Stream~3b, \NEW):
+  \texttt{verbalize\_consequence}$(r_{t-1}, \Delta d_{t-1})$ $\to$
+  frozen CLIP encoder. Captures \emph{what happened as a result},
+  orthogonally to \emph{what was attempted}---the \textbf{E} in
+  V-\underline{E}-R-A.
+\end{itemize}
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=1.5em,itemsep=2pt]
+\item \textbf{\modelname}: five-stream closed-loop robot policy with dual
+  action-narration + outcome-experience feedback fused by a LLaMA-style
+  Reasoning Transformer with ViLT modality-type embeddings (\S\ref{sec:model}).
+\item \textbf{Rich experience verbalization}: \texttt{verbalize\_consequence()}
+  maps scalar reward $+$ $\Delta d$ to up to 16 semantically distinct
+  CLIP-compatible strings, requiring zero additional pretraining (\S\ref{sec:experience}).
+\item \textbf{Dual action head}: a parallel continuous regression head
+  co-trained with MSE enables end-effector command prediction alongside the
+  discrete policy (\S\ref{sec:model}).
+\item \textbf{Reward-weighted InfoNCE alignment}: auxiliary contrastive loss
+  that teaches the fusion space which past actions are worth repeating
+  (\S\ref{sec:alignment}).
+\item \textbf{Causal-mask CLS placement}: we identify and fix a latent
+  design error common to causal-mask VLA implementations (\S\ref{sec:bug}).
+\end{enumerate}
+
+%% ============================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Vision-Language-Action Models.}
+RT-2~\citep{brohan2023rt2}, Octo~\citep{octo2024}, OpenVLA~\citep{kim2024openvla},
+and $\pi_0$~\citep{black2024pi0} are stateless at inference.
+None closes the experience--reasoning feedback loop.
+
+\paragraph{$\pi_{0.5}$ and open-world generalisation.}
+$\pi_{0.5}$~\citep{hejna2025pi05} encodes prior actions autoregressively
+but carries \textbf{no signal for whether they succeeded}.
+\modelname\ addresses this directly with Stream~3b and the reward gate.
+Furthermore, $\pi_{0.5}$ operates at PoliGemma scale;
+\modelname\ achieves closed-loop feedback with only ${\approx}4$M
+trainable parameters on a single 8\,GB GPU.
+
+\paragraph{Interactive Agent Foundation Model.}
+Durante et al.~\citep{durante2024agent} train a unified model across
+robotics (Language-Table~\citep{lynch2023languagetable},
+CALVIN~\citep{mees2022calvin}), gaming, and healthcare.
+Action history is encoded as discrete tokens with no access to the reward
+signal or spatial outcome.
+\modelname\ makes consequence explicit and reward-aware, and
+encodes the full low-level continuous action vector in Stream~4.
+
+\paragraph{Sequence Models for RL.}
+Decision Transformer~\citep{chen2021decision} and Gato~\citep{reed2022gato}
+encode history numerically; we encode it as language.
+
+\paragraph{Language as an RL interface.}
+SayCan~\citep{ahn2022saycan} and ELLM~\citep{du2023ellm} use language for
+planning or reward shaping.
+We differ: language is the \emph{input encoding} of past experience at
+every step.
+
+\paragraph{Contrastive alignment.}
+CLIP~\citep{radford2021clip} and ViLT~\citep{kim2021vilt} inspire our
+per-token modality-type embeddings and reward-weighted InfoNCE auxiliary loss.
+
+\paragraph{LLaMA architecture.}
+RMSNorm~\citep{zhang2019rmsnorm}, RoPE~\citep{su2021rope}, and
+SwiGLU~\citep{shazeer2020swiglu} improve stability over a standard
+Transformer encoder~\citep{vaswani2017attention}.
+
+%% ============================================================================
+\section{VERA Architecture}
+\label{sec:model}
+
+\subsection{Overview}
+
+\modelname\ processes five streams at each timestep $t$:
+\begin{enumerate}[leftmargin=1.5em,itemsep=1pt]
+  \item \textbf{Vision}: $T{=}3$ RGB frames $\in\mathbb{R}^{3\times224\times224}$
+  \item \textbf{Instruction}: fixed natural-language goal (77 CLIP BPE tokens)
+  \item \textbf{Action Narration} (\Lact): previous action verbalized and
+        re-encoded; reward-gated soft memory
+  \item \textbf{Experience} (\Lexp, \NEW): scalar $r_{t-1}$ and
+        $\Delta d_{t-1}$ verbalized as outcome
+  \item \textbf{History}: window $\{(a_{t-H},\mathbf{v}_{t-H},r_{t-H}),
+        \ldots,(a_{t-1},\mathbf{v}_{t-1},r_{t-1})\}$, $H{=}4$
+\end{enumerate}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{docs/VERA.png}
+  \caption{\textbf{\modelname\ architecture.}
+    Five streams are encoded by the frozen CLIP backbone (vision + three language streams)
+    or a dedicated history encoder, projected to $d{=}256$, assembled as an 11-token
+    sequence, and fused by a LLaMA-style causal Transformer.
+    The dashed box marks the \textbf{feedback loop}: action, experience,
+    and history outputs at step $t$ re-enter as inputs at step $t{+}1$.
+    Novel components highlighted in orange: \Lexp\ (Stream~3b),
+    the reward gate on \Lact, and the continuous regression head.}
+  \label{fig:arch}
+\end{figure}
+
+\subsection{Frozen CLIP Backbone}
+
+CLIP ViT-B/32~\citep{radford2021clip,dosovitskiy2021vit} is shared across
+Streams~1--3b and never updated.
+Each stream has an independent trainable projection:
+\begin{equation}
+  \mathbf{z}^{(s)} = \mathrm{RMSNorm}(W^{(s)}\,\mathbf{e}^{(s)}_{\mathrm{CLIP}}),
+  \quad W^{(s)}\!\in\!\mathbb{R}^{256\times512}, \;\; s\in\{1,2,3a,3b\}
+  \label{eq:proj}
+\end{equation}
+
+\subsection{Reward-Gated Action Narration Encoder (Stream~3a)}
+\begin{equation}
+  \mathbf{z}_{3a} = \underbrace{\sigma\!\left(\mathrm{MLP}(r_{t-1})\right)}_{\text{reward gate}} \cdot
+                    \mathrm{RMSNorm}(W^{(3a)}\,
+                    \mathrm{CLIP}_{\mathrm{text}}(\mathrm{vocab}[a_{t-1}]))
+  \label{eq:action_enc}
+\end{equation}
+
+\subsection{Experience Encoder (Stream~3b)}
+\label{sec:experience}
+\label{sec:consequence}
+
+\paragraph{Verbalization.}
+\begin{equation}
+  c_{t-1} = \texttt{verbalize\_consequence}(r_{t-1},\,\Delta d_{t-1})
+\end{equation}
+The function jointly encodes direction ($\Delta d$), magnitude
+(\textit{significantly}/\textit{slightly}/\textit{barely}), and reward quality
+(high/moderate/small/none/penalty), yielding up to 16 semantically distinct
+strings. Representative outputs:
+
+\vspace{4pt}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lll}
+\toprule
+$\Delta d_{t-1}$ & Reward & Output string \\
+\midrule
+$<{-}0.15$ & ${\ge}0.5$   & ``I moved significantly closer to the goal and received a high reward'' \\
+$<{-}0.05$ & ${<}{-}0.05$ & ``I moved slightly closer to the goal yet received a penalty'' \\
+$>{+}0.05$ & ${<}{-}0.05$ & ``I moved significantly farther from the goal and received a penalty'' \\
+$|\Delta d|\le0.05$ & ${\ge}0.5$ & ``My position barely changed but I received a high reward'' \\
+\multicolumn{2}{l}{$\Delta d$ unavailable, $r{>}0.5$} & ``I completed the task successfully and received a high reward'' \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+
+\begin{equation}
+  \mathbf{z}_{3b} = \mathrm{RMSNorm}(W^{(3b)}\,\mathrm{CLIP}_{\mathrm{text}}(c_{t-1}))
+  \label{eq:experience_enc}
+\end{equation}
+
+\subsection{History Encoder (Stream~4)}
+
+Each step $i\in\{t{-}H,\ldots,t{-}1\}$ contributes three signals:
+discrete index $a_i$, low-level continuous vector $\mathbf{v}_i\in\mathbb{R}^{d_{\mathrm{act}}}$,
+and scalar reward $r_i$.
+\begin{align}
+  \mathbf{h}_i = \mathrm{SiLU}\!\bigl(
+    \mathrm{RMSNorm}(W_f[\mathbf{a}_i^{d}\|\mathbf{a}_i^{c}\|\mathbf{r}_i])
+  \bigr) + \mathrm{SinPE}(i),
+  \quad \mathbf{a}_i^{c} = \sigma(\mathrm{MLP}(r_i))\cdot\mathrm{RMSNorm}(W_v\,\mathbf{v}_i)
+  \label{eq:hist_tok}
+\end{align}
+The $H{=}4$ history tokens are refined by a 2-layer LLaMA sub-transformer
+before entering the main fusion stack.
+When no continuous vector is available $\mathbf{v}_i{=}\mathbf{0}$ and the
+encoder degrades gracefully to the discrete-only baseline.
+
+\subsection{Token Sequence and ViLT Modality Embeddings}
+\label{sec:tokens}
+\begin{equation}
+  \mathbf{X} = \bigl[\,
+    \mathbf{z}_2 \;\|\; \mathbf{z}_{3a} \;\|\; \mathbf{z}_{3b} \;\|\;
+    \mathbf{z}_1^{1:T} \;\|\; \mathbf{h}_{t-H:t-1} \;\|\; \mathbf{c}
+  \,\bigr] \;\in\mathbb{R}^{11\times256}
+  \label{eq:sequence}
+\end{equation}
+with $T{=}3$, $H{=}4$: $S = 1{+}1{+}1{+}3{+}4{+}1 = 11$ tokens.
+Following ViLT~\citep{kim2021vilt}, each token receives a learnable
+\emph{modality-type embedding} $\mathbf{m}^{(s)}\!\in\!\mathbb{R}^{256}$
+from five types: instruction/CLS (0), action narration (1), vision (2),
+history (3), experience (4).
+
+\subsection{LLaMA Fusion Transformer}
+\label{sec:fusion}
+\begin{equation}
+  \mathbf{X}^{(\ell+1)}
+  = \mathbf{X}^{(\ell)}
+  + \mathrm{MHA}_{\mathrm{RoPE}}\!\left(\mathrm{RMSNorm}(\mathbf{X}^{(\ell)}),\,\mathbf{M}\right)
+  + \mathrm{SwiGLU}\!\left(\mathrm{RMSNorm}(\mathbf{X}^{(\ell)})\right)
+  \label{eq:llama}
+\end{equation}
+Six decoder blocks; causal mask $\mathbf{M}$; CLS at last position attends
+to all 10 preceding tokens.
+
+\subsection{Dual Action Head}
+\paragraph{Discrete classifier.}
+\begin{equation}
+  \hat{\mathbf{y}} = W_3\,\mathrm{SiLU}(W_2\,\mathrm{SiLU}(W_1\,\mathrm{RMSNorm}(\mathbf{c}')))
+  \;\in\mathbb{R}^N
+\end{equation}
+
+\paragraph{Continuous regression head \NEW.}
+\begin{equation}
+  \hat{\mathbf{v}}_t = \mathrm{Tanh}(W_5\,\mathrm{SiLU}(W_4\,\mathrm{RMSNorm}(\mathbf{c}')))
+  \;\in[-1,1]^{d_{\mathrm{act}}}
+\end{equation}
+$d_{\mathrm{act}}\!\in\!\{2,4,7\}$ for Language-Table, MetaWorld, CALVIN.
+
+\subsection{Reward-Weighted InfoNCE Alignment Loss}
+\label{sec:alignment}
+\begin{equation}
+  \mathcal{L}_{\mathrm{align}}
+  = \tfrac{1}{2}\bigl[
+    \mathrm{InfoNCE}(\mathbf{e}_2,\,\mathbf{e}_{3a},\,r)
+    + \mathrm{InfoNCE}(\mathbf{e}_2,\,\mathbf{e}_{3b},\,r)
+  \bigr],
+  \quad
+  \mathrm{InfoNCE}(\mathbf{e}_q,\mathbf{e}_k,r)
+  = -\frac{1}{B}\sum_{i}r_i\cdot
+    \log\frac{e^{\mathbf{e}_q^{(i)}\cdot\mathbf{e}_k^{(i)}/\tau}}
+             {\sum_{j}e^{\mathbf{e}_q^{(i)}\cdot\mathbf{e}_k^{(j)}/\tau}}
+\end{equation}
+Total SFT loss: $\mathcal{L}_{\mathrm{SFT}}
+  = \mathcal{L}_{\mathrm{BC}} + 0.1\,\mathcal{L}_{\mathrm{align}}
+  + 0.5\,\mathcal{L}_{\mathrm{reg}}$.
+
+\subsection{Critical Bug: CLS Token Isolation}
+\label{sec:bug}
+Under a causal mask, position~$i$ attends only to positions $j{\le}i$.
+The original CLS at position~0 attends only to itself across all 6 layers;
+the entire CLIP encoding is ignored.
+Fix: place CLS last so it attends to all 10 preceding tokens.
+
+\paragraph{Parameter count.}
+\begin{table}[h]
+\centering
+\caption{Parameter breakdown (\texttt{freeze\_clip=True}).}
+\label{tab:params}
+\small
+\begin{tabular}{lrr}
+\toprule
+\textbf{Component} & \textbf{Params} & \textbf{Trainable} \\
+\midrule
+CLIP ViT-B/32 image encoder              & ${\approx}$86.2M & No  \\
+CLIP text encoder                         & ${\approx}$37.8M & No  \\
+\midrule
+Projections (vis, lang, act, con) + norms & ${\approx}$531K  & Yes \\
+ViLT modality-type embeddings (5 types)  & 1,280            & Yes \\
+History Encoder (2-layer LLaMA)           & ${\approx}$267K  & Yes \\
+LLaMA Fusion Transformer (6L, 8H)         & ${\approx}$3.2M  & Yes \\
+Discrete Action Head (3-layer MLP)        & ${\approx}$66K   & Yes \\
+Continuous Regression Head \NEW           & ${\approx}$33K   & Yes \\
+CLS token                                 & 256              & Yes \\
+\midrule
+\textbf{Total trainable}                 & ${\approx}$\textbf{4.25M} & \\
+\textbf{Total (incl.\ frozen)}           & ${\approx}$\textbf{128M}  & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================================
+\section{Training}
+\label{sec:training}
+
+\subsection{Phase 1 — Behavioural Cloning (SFT)}
+Cross-entropy with label smoothing $\epsilon{=}0.05$; AdamW $\eta{=}3{\times}10^{-4}$
+with cosine decay to $10^{-6}$ after 5\% linear warmup; batch 32;
+gradient clip 1.0; early-stopping patience 10 epochs; max 100 epochs.
+
+\subsection{Phase 2 — Online RL}
+REINFORCE with value baseline, entropy bonus (0.01), and a KL penalty
+against the SFT checkpoint (0.1) to prevent catastrophic forgetting:
+\begin{equation}
+  \mathcal{L}_{\mathrm{RL}}
+  = -\mathbb{E}[\log\pi_\theta(a_t)\cdot\hat{G}_t]
+  + \tfrac{1}{2}\mathbb{E}[(V(s_t){-}G_t)^2]
+  - 0.01\,\mathcal{H}[\pi_\theta]
+  + 0.1\,D_{\mathrm{KL}}(\pi_\theta\|\pi_{\mathrm{BC}})
+\end{equation}
+
+%% ============================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Environments and Datasets}
+
+\paragraph{Language-Table~\citep{lynch2023languagetable}.}
+Language-Table is a language-conditioned tabletop manipulation benchmark
+in which a robot arm must push blocks to goal positions specified by
+natural-language instructions (e.g.\ \textit{``push the star near the moon''}).
+Actions are 2-DoF end-effector displacements $\mathbf{v}\!\in\![-1,1]^2$.
+We discretize into an \textbf{8-bin vocabulary}
+($x{+}$, $x{-}$, $y{+}$, $y{-}$, combined diagonals, stop)
+and an 80/20 random split provides train/validation splits.
+Language-Table serves as our \textbf{primary evaluation environment}:
+completed results are reported in Table~\ref{tab:lt_results}.
+
+\paragraph{CALVIN D$\to$D~\citep{mees2022calvin}.}
+5,124 language-annotated training episodes spanning 34 manipulation tasks
+(e.g.\ \textit{lift block}, \textit{push button}, \textit{open drawer})
+recorded with a 7-DoF arm at 3 fps.
+We discretize the 7-DoF action space into a \textbf{14-bin direction-aware
+vocabulary}: positive/negative direction for each of $x, y, z$, roll, pitch, yaw,
+plus gripper open/close.
+The regression branch predicts the full 7-DoF vector
+$\mathbf{v}\!\in\![-1,1]^7$.
+The full 9-variant ablation study is being conducted on CALVIN D$\to$D
+in parallel with Language-Table (Section~\ref{sec:ablation_status}).
+
+\paragraph{BabyAI/MiniGrid~\citep{chevalier2019babyai,minigrid} and
+Meta-World~\citep{yu2020metaworld}.}
+Grid-world and tabletop manipulation environments planned for extended
+ablation validation and RL sample-efficiency measurement.
+Results will be reported in the final version.
+
+\subsection{Ablation Variants}
+\label{sec:ablation_status}
+
+Nine architectural variants are evaluated on \textbf{both Language-Table and
+CALVIN D$\to$D} (3 seeds each).
+Table~\ref{tab:ablation_status} shows the current status.
+
+\begin{table}[h]
+\centering
+\caption{Ablation status across both evaluation environments (3 seeds each).}
+\label{tab:ablation_status}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{clllcc}
+\toprule
+\textbf{\#} & \textbf{Name} & \textbf{Streams removed} & \textbf{Key change}
+            & \textbf{Lang-Table} & \textbf{CALVIN} \\
+\midrule
+0 & Full \modelname        & —                  & all streams active    & \textbf{Done} & Pending \\
+1 & BC/SFT baseline        & 3a, 3b, hist TF    & minimal VLA           & \textbf{Done} & Pending \\
+4 & No language feedback   & 3a, 3b             & keeps hist TF + gate  & \textbf{Running} & \textbf{Running} \\
+2 & No \Lexp               & 3b                 & act narration only    & Pending & Pending \\
+3 & No \Lact               & 3a                 & experience only       & Pending & Pending \\
+5 & No history TF          & hist sub-TF        & flat positional hist  & Pending & Pending \\
+6 & No reward gate         & gate               & $g\!\equiv\!1$        & Pending & Pending \\
+7 & No dual head           & reg head           & $\lambda_\mathrm{reg}{=}0$ & Pending & Pending \\
+8 & Corrupted \Lexp        & —                  & random consequence text & Pending & Pending \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Language-Table Results}
+\label{sec:lt_results}
+
+Table~\ref{tab:lt_results} reports the two completed conditions and the
+in-progress no-language-feedback ablation on Language-Table.
+The no-language-feedback ablation is the most diagnostic comparison:
+it retains the temporal history transformer and reward gate while removing
+\emph{only} the language-alignment streams (\Lact\ and \Lexp), directly
+isolating their contribution to the $+0.57$ pp gain.
+
+\begin{table}[t]
+\centering
+\caption{
+  \textbf{Language-Table validation action-classification accuracy}
+  (mean $\pm$ std, 3 seeds).
+  Full \modelname\ outperforms the BC baseline by $+0.57$ pp across all seeds.
+  $^\dagger$Disables both \Lact\ and \Lexp; temporal history TF and reward gate remain active.
+}
+\label{tab:lt_results}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Seed 42} & \textbf{Seed 123} & \textbf{Seed 456}
+                & \textbf{Mean $\pm$ Std} \\
+\midrule
+BC/SFT baseline (no lang, no hist TF)
+  & 48.8 & 51.2 & 52.4 & $50.8 \pm 1.8$ \\
+No language feedback$^\dagger$
+  & \tbd & \tbd & \tbd & \textit{in progress} \\
+\midrule
+\textbf{Full \modelname\ (ours)}
+  & \textbf{49.2} & \textbf{52.3} & \textbf{52.6} & $\mathbf{51.4 \pm 1.9}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpreting the gap.}
+The $+0.57$ pp absolute gain over BC on Language-Table
+is modest in isolation but \emph{consistent} across all three seeds
+(positive deltas: $+0.4$, $+1.1$, $+0.2$ pp).
+Validation \emph{classification} accuracy on discrete action bins is a proxy
+for task success; small gains in action prediction often compound significantly
+in closed-loop rollout evaluations.
+The no-language-feedback ablation (currently running on Language-Table and CALVIN)
+will directly answer whether the $+0.57$ pp margin is driven by the dual
+language-alignment streams or by other architectural choices.
+
+\paragraph{Alignment diagnostics.}
+During training, the reward-weighted InfoNCE loss produces two cosine
+similarity diagnostics logged per epoch:
+$\cos(\mathbf{e}_{3a}, \mathbf{e}_2)$ tracks how well action narrations
+align with the instruction, and $\cos(\mathbf{e}_{3b}, \mathbf{e}_2)$
+tracks experience alignment.
+For Full \modelname\ both cosines rise monotonically over training,
+confirming that the alignment loss progressively draws successful-experience
+embeddings toward the instruction.
+The BC baseline exhibits flat cosines (no alignment loss), providing a
+null baseline.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.90\linewidth}{\centering\vspace{1.5em}
+  \textbf{[FIGURE: Alignment Cosine Curves]}\\[6pt]
+  \small
+  $\cos(\mathbf{e}_\mathrm{act}, \mathbf{e}_\mathrm{instr})$ and
+  $\cos(\mathbf{e}_\mathrm{exp}, \mathbf{e}_\mathrm{instr})$ vs.\ epoch
+  for Full \modelname\ and BC baseline on Language-Table (3 seeds, shaded $\pm1$ std).\\[6pt]
+  \textit{Data source:} \texttt{checkpoints/\{full\_vera,bc\_baseline\}/seed*/sft\_vera\_log.json}
+  \quad columns: \texttt{train\_cos\_exp}, \texttt{train\_cos\_rsn}
+  \vspace{1.5em}
+}}
+\caption{Alignment cosine dynamics on Language-Table.
+  Rising cosines validate that the InfoNCE loss anchors successful
+  experience tokens near the instruction embedding; flat BC curves serve
+  as a null baseline.}
+\label{fig:cosine}
+\end{figure}
+
+\subsection{Full Ablation Study (Language-Table + CALVIN D$\to$D)}
+\label{sec:ablation_extended}
+
+The complete nine-way ablation study—spanning both Language-Table and
+CALVIN D$\to$D—is in progress.
+Table~\ref{tab:ablations} shows the planned structure for the combined results.
+
+\begin{table}[h]
+\centering
+\caption{Full ablation study across both environments (3 seeds; results pending except rows marked Complete).}
+\label{tab:ablations}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{clccc}
+\toprule
+\textbf{ID} & \textbf{Variant} & \textbf{Streams}
+            & \makecell{Lang-Table\\Val Acc}
+            & \makecell{CALVIN D$\to$D\\Val Acc} \\
+\midrule
+0  & Full \modelname\ (ours)              & 1,2,3a,3b,4  & $\mathbf{51.4\pm1.9}$ & \tbd \\
+1  & BC/SFT baseline                      & 1,2          & $50.8\pm1.8$          & \tbd \\
+4  & No language feedback$^\dagger$       & 1,2,4        & \textit{running}      & \textit{running} \\
+2  & No experience (\Lexp\ only removed)  & 1,2,3a,4     & \tbd                  & \tbd \\
+3  & No action narration (\Lact\ only)    & 1,2,3b,4     & \tbd                  & \tbd \\
+5  & No temporal history TF               & 1,2,3a,3b    & \tbd                  & \tbd \\
+6  & No reward gate ($g\!\equiv\!1$)      & 1,2,3a*,3b,4 & \tbd                  & \tbd \\
+7  & No regression head                   & 1,2,3a,3b,4  & \tbd                  & \tbd \\
+8  & Corrupted \Lexp\ (random text)       & 1,2,3a,3b,4  & \tbd                  & \tbd \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize $^\dagger$Keeps temporal history TF and reward gate; removes both language streams.}\\
+\end{tabular}
+\end{table}
+
+\subsection{Model Comparison and Computational Efficiency}
+\label{sec:comparison}
+
+\paragraph{FLOPs analysis.}
+Table~\ref{tab:flops} breaks down VERA's per-step inference cost.
+Frozen CLIP dominates: $3 \times 4.4$\,GFLOPs for vision frames
+and $3 \times 5.8$\,GFLOPs for the three text streams
+(instruction, action narration, experience), totalling $\approx\!31$\,GFLOPs.
+The \emph{trainable} fusion path costs only $\approx\!0.12$\,GFLOPs
+(${\approx}260\times$ less than total), meaning training
+and fine-tuning run efficiently on a single 8\,GB GPU.
+If the instruction embedding is cached across a task episode (constant instruction),
+total cost drops to $\approx\!25$\,GFLOPs.
+
+\begin{table}[h]
+\centering
+\caption{VERA per-step inference FLOPs breakdown ($T{=}3$ frames, $H{=}4$ history, $S{=}11$ tokens).}
+\label{tab:flops}
+\small
+\begin{tabular}{lrr}
+\toprule
+\textbf{Component} & \textbf{GFLOPs} & \textbf{Trainable?} \\
+\midrule
+CLIP ViT-B/32 image enc.\ ($T{=}3$ frames, $224^2$) & 13.2  & No  \\
+CLIP text enc.\ $\times3$ (instr.\ + \Lact\ + \Lexp, 77 tok) & 17.4  & No  \\
+\midrule
+Stream projections ($4\times$, $512\!\to\!256$)  & 0.002 & Yes \\
+History encoder (2-layer LLaMA, $H{=}4$, $d{=}256$) & 0.013 & Yes \\
+Fusion Transformer (6-layer LLaMA, $S{=}11$, $d{=}256$, $d_{\mathrm{ff}}{=}704$) & 0.106 & Yes \\
+Action heads (discrete + regression)             & $<$0.001 & Yes \\
+\midrule
+\textbf{Total}            & \textbf{30.7}  &     \\
+\textbf{Trainable only}   & \textbf{0.12}  & Yes \\
+\textbf{Total (instr.\ cached)}  & \textbf{24.9} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Comparison with prior VLA models.
+  FLOPs are per action-inference step (estimated).
+  $^\dagger$Trainable-only FLOPs; total incl.\ frozen CLIP: ${\approx}31$\,GFLOPs.
+  $^\ddagger$Closed-loop = history or feedback at inference time.}
+\label{tab:comparison}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrlcc}
+\toprule
+\textbf{Model} & \textbf{Total params} & \textbf{Trainable} & \textbf{FLOPs/step}
+               & \textbf{Lang feedback} & \textbf{Closed-loop$^\ddagger$} & \textbf{Open} \\
+\midrule
+RT-2~\citep{brohan2023rt2}     & 55B  & 55B   & $\ge$5\,TFLOPs   & No  & No          & No  \\
+OpenVLA~\citep{kim2024openvla} & 7.5B & 7.5B  & ${\sim}1.5$\,TFLOPs & No & No        & Yes \\
+$\pi_0$~\citep{black2024pi0}   & 3.3B & 3.3B  & ${\sim}400$\,GFLOPs & No & No        & No  \\
+Octo~\citep{octo2024}          & 93M  & 93M   & ${\sim}26$\,GFLOPs  & No & Num.\ only & Yes \\
+DT~\citep{chen2021decision}    & ${\sim}$50M & ${\sim}$50M & ${\sim}5$\,GFLOPs & No & Num.\ only & Yes \\
+\midrule
+\textbf{\modelname\ (ours)}    & \textbf{128M} & \textbf{4.25M}
+                               & $\mathbf{{\approx}0.12\,\text{GFLOPs}}^\dagger$
+                               & \textbf{Act+Exp} & \textbf{Lang+Num} & \textbf{Yes} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Key efficiency observation.}
+\modelname\ achieves closed-loop language feedback with only 4.25M trainable
+parameters --- $22\times$ fewer than Octo (93M), $1,760\times$ fewer than
+OpenVLA (7.5B), and $12,900\times$ fewer than RT-2 (55B).
+The trainable inference path (${\approx}0.12$\,GFLOPs) is three orders of
+magnitude cheaper than RT-2 and fits entirely on a single 8\,GB GPU.
+Total per-step cost (${\approx}31$\,GFLOPs) is comparable to Octo while
+adding closed-loop language feedback that no prior model provides.
+
+%% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \modelname, a five-stream closed-loop robot policy that
+re-injects action experience and environmental consequences back into
+the decision process at every step via language.
+On Language-Table (3 seeds), Full \modelname\
+achieves $51.4\%\,(\pm1.9\%)$ validation accuracy versus $50.8\%\,(\pm1.8\%)$
+for the BC baseline---a consistent positive gain across all three seeds.
+The no-language-feedback ablation is in progress on both Language-Table
+and CALVIN D$\to$D (34 manipulation tasks, 7-DoF) to isolate whether the
+gain is driven by the dual alignment streams or by architectural complexity.
+The dual feedback design---\Lact\ capturing \emph{what was attempted} and
+\Lexp\ capturing \emph{what happened}---exploits CLIP's preexisting
+semantic structure to ground outcome concepts with no additional pretraining.
+With only 4.2M trainable parameters, \modelname\ trains on a single
+consumer GPU while closing the feedback loop that stateless VLA
+baselines leave open.
+
+%% ============================================================================
+\section*{Limitations}
+
+\textbf{Verbalization granularity.}
+\texttt{verbalize\_consequence()} maps signals to $\leq16$ template strings.
+A learned verbalizer could capture finer distinctions at higher compute cost.
+
+\textbf{Results pending.}
+Table~\ref{tab:lt_results} contains one pending row (no-language-feedback on Language-Table);
+Table~\ref{tab:ablations} reports one completed column (Language-Table: Full VERA and BC)
+with all CALVIN D$\to$D entries and remaining ablations in progress.
+The no-language-feedback results on both environments will be ready within
+48~hours of submission.
+
+\textbf{Classification proxy.}
+Validation accuracy on discrete action bins is a proxy for task success.
+Closed-loop rollout evaluation on Language-Table and CALVIN is planned for
+the camera-ready version.
+
+\textbf{Simulation only.}
+The \texttt{RealEnv} stub is unvalidated on physical hardware.
+
+%% ============================================================================
+\section*{Broader Impact}
+
+History-conditioned policies reduce human re-intervention when robots fail,
+increasing autonomy in assistive and industrial settings.
+The 4.2M trainable-parameter design lowers hardware barriers for academic
+research.
+On the negative side, more autonomous robots may displace workers.
+Adversarial reward manipulation could theoretically exploit the reward gate,
+though this requires physical access to the reward channel and is partially
+mitigated by sigmoid clamping.
+
+%% ── References ───────────────────────────────────────────────────────────────
+\bibliography{references}
+\bibliographystyle{plain}
+
+\clearpage
+\appendix
+
+%% ============================================================================
+\section{Full Causal Attention Mask}
+\label{app:mask}
+
+\begin{table}[h]
+\centering
+\caption{11$\times$11 causal mask. \cmark\ = can attend.
+         $\ell$=instr, $a$=action, $c$=exp., $v$=vision, $h$=history.}
+\label{tab:mask}
+\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{r|ccccccccccc}
+\toprule
+ & $\ell$ & $a$ & $c$ & $v_0$ & $v_1$ & $v_2$ & $h_0$ & $h_1$ & $h_2$ & $h_3$ & CLS \\
+\midrule
+$\ell$   & \cmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$a$      & \cmark&\cmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$c$      & \cmark&\cmark&\cmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$v_0$    & \cmark&\cmark&\cmark&\cmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$v_1$    & \cmark&\cmark&\cmark&\cmark&\cmark&\xmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$v_2$    & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\xmark&\xmark&\xmark&\xmark&\xmark \\
+$h_0$    & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\xmark&\xmark&\xmark&\xmark \\
+$h_1$    & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\xmark&\xmark&\xmark \\
+$h_2$    & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\xmark&\xmark \\
+$h_3$    & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\xmark \\
+CLS      & \cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark&\cmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================================
+\section{Hyperparameter Reference}
+\label{app:hparams}
+
+\begin{table}[h]
+\centering
+\caption{Full hyperparameter reference.}
+\label{tab:hparams}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Hyperparameter} & \textbf{Default} & \textbf{Description} \\
+\midrule
+\multicolumn{3}{l}{\textit{Architecture}} \\
+$T$ (vis frames)        & 3     & Video frame buffer \\
+$H$ (history steps)     & 4     & Past $(a,\mathbf{v},r)$ tuples \\
+$d$                     & 256   & Shared fusion dimension \\
+Fusion layers           & 6     & LLaMA decoder layers \\
+Fusion heads            & 8     & Attention heads \\
+\midrule
+\multicolumn{3}{l}{\textit{SFT}} \\
+$\eta$                  & $3\!\times\!10^{-4}$ & AdamW LR (cosine to $10^{-6}$) \\
+Epochs (max)            & 100   & Early-stopping patience = 10 \\
+Batch size              & 32    & \\
+$\lambda_\mathrm{align}$& 0.1   & InfoNCE weight \\
+$\lambda_\mathrm{reg}$  & 0.5   & Regression MSE weight \\
+Label smoothing $\epsilon$ & 0.05 & \\
+Grad clip               & 1.0   & \\
+\midrule
+\multicolumn{3}{l}{\textit{RL}} \\
+$\eta$                  & $1\!\times\!10^{-5}$ & AdamW LR \\
+$\gamma$                & 0.99  & Discount factor \\
+Entropy coef            & 0.01  & \\
+KL coef                 & 0.1   & Against SFT checkpoint \\
+Value loss coef         & 0.5   & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================================
+\section{Alternative Feedback Encodings Considered}
+\label{app:alternatives}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{L{4cm}L{8.5cm}}
+\toprule
+\textbf{Alternative} & \textbf{Reason for rejection} \\
+\midrule
+Raw $(a_t,r_t)$ numeric token &
+  Bypasses CLIP's semantic structure; model must learn action semantics from scratch. \\
+Single token for action+experience &
+  Act narration (\Lact) and outcome (\Lexp) are orthogonal; conflation prevents
+  independent specialisation. Ablations F and G quantify this. \\
+Learned verbalizer (LLM) &
+  Adds $>$1B parameters, requires pretraining; incompatible with frozen CLIP. \\
+\bottomrule
+\end{tabular}
+\caption{Alternative feedback strategies considered and rejected.}
+\label{tab:alternatives}
+\end{table}
+
+\end{document}

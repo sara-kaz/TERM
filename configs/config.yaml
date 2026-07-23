@@ -1,0 +1,209 @@
+# ── VERA-Robot-Learning Configuration ─────────────────────────────────────────
+# Vision-Language-Language-Action model with dual semantic+numerical feedback.
+# DEFAULT: Language-Table (Lynch et al., 2023) — 2-DoF planar push tasks.
+# See "Dataset Presets" section below for CALVIN / MetaWorld overrides.
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  num_actions:    8           # discrete action space size
+                              # Language-Table: 8 directional bins (arctan2 sectors)
+  history_len:    4           # number of (action, reward) history steps
+  num_vis_frames: 3           # number of video frames per observation
+  fusion_layers:  6           # causal fusion transformer depth
+  fusion_heads:   8           # attention heads in fusion transformer
+  d_model:        256         # shared embedding dimension
+  d_ff_scale:     4           # feedforward dim = d_model * d_ff_scale
+  dropout:        0.1
+  freeze_clip:    true        # keep CLIP backbone frozen (recommended)
+  unfreeze_clip_vision: true  # fine-tune ViT image encoder — needed for LT domain
+                              # adaptation (overhead synthetic images ≠ ImageNet).
+                              # Frozen CLIP vision caps val_acc at ~0.455 because
+                              # features don't encode push direction from above.
+                              # Use clip_vision_lr=3e-6 (10× smaller than before)
+                              # to fine-tune slowly without overfitting.
+  action_dim:     2           # continuous action vector dimension — MUST match dataset
+                              # Language-Table=2 [Δx,Δy]  MetaWorld=4  CALVIN=7
+  chunk_size:     1           # MUST be 1 until multi-step chunk rollout is implemented
+                              # (K>1 without rollout support leaves action_head unsupervised)
+
+# ── VERA-Specific Settings ─────────────────────────────────────────────────────
+vera:
+  # Ablation flags: set any to false to run ablation experiments
+  use_lang_feedback:      true    # legacy alias for use_action_lang_feedback
+  use_action_lang_feedback: true  # Stream 3a
+  use_temporal_history:   true    # TemporalHistoryTransformer over numerical history
+  use_reward_gate:        true    # reward-conditioned gate on semantic feedback
+  use_consequence_token:  true    # Stream 3b: separate CLIP token for action outcome [NEW]
+                                  # encodes WHAT HAPPENED (not what action was taken)
+                                  # strings generated dynamically from reward + state_delta
+                                  # token sequence: L_instr | L_action | L_consequence | V | H | CLS
+  use_step_conditioning:  true    # VLAConf-style phase FiLM on feedback tokens
+  step_horizon:           50      # fixed rollout horizon K (clip + progress scalar)
+
+  # Auxiliary contrastive alignment loss coefficient (λ_align)
+  # Applied to BOTH action and consequence alignment terms (averaged).
+  #
+  # Why 0.1 (reduced from 1.0):
+  #   At λ=1.0, the InfoNCE term dominates the total loss (~3.46 units) but
+  #   does NOT converge on Language-Table — it stays at the random-batch
+  #   baseline (log(B)=log(32)≈3.47) for 40+ epochs. Root cause: LT shaped
+  #   rewards are tiny (≈0.01–0.05), so exp(5r)≈1.05–1.28 for nearly every
+  #   step — there is almost no contrast between "good" and "bad" steps in a
+  #   batch. The InfoNCE cannot find a learning signal and contributes only
+  #   gradient noise that fights the CE objective.
+  #   At λ=0.1, the alignment term contributes ~0.35 units — enough to keep
+  #   the projection layers from collapsing to zero without drowning the CE
+  #   loss that actually drives action prediction. The contrastive signal
+  #   provides light regularisation rather than a dominant objective.
+  #
+  # Set to 0.0 to ablate all alignment losses (Ablation D).
+  alignment_loss_coef:    0.1
+
+  # Continuous action regression loss coefficient (λ_reg)
+  # MSE between predicted action_vec and expert's executed action vector.
+  # Only active when dataset supplies action_vectors (CALVIN, Language-Table, MetaWorld).
+  # Set to 0.0 to ablate the regression head (discrete-only baseline).
+  regression_loss_coef:   0.5
+
+  # Language-Table 8-bin angle-quantised action vocabulary.
+  # Bins correspond to arctan2(Δy,Δx) quantised into 8 equal sectors (π/4 each).
+  # These domain-specific strings give E_act stronger semantic signal than the
+  # generic "I performed action N" fallback used for MetaWorld / synthetic data.
+  action_vocab:
+    0: "I pushed the object to the right"
+    1: "I pushed the object up and to the right"
+    2: "I pushed the object upward"
+    3: "I pushed the object up and to the left"
+    4: "I pushed the object to the left"
+    5: "I pushed the object down and to the left"
+    6: "I pushed the object downward"
+    7: "I pushed the object down and to the right"
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  episodes_path:       null     # ← SET THIS to your Language-Table root directory
+                                # e.g. /content/drive/MyDrive/language_table_data
+                                # null → falls back to synthetic episodes (for testing)
+  dataset_type:        language_table  # "pkl" | "language_table" | "calvin"
+                                       # language_table: expects root/episode_XXX/steps.pkl
+                                       # calvin:         expects root/training/*.npz + lang_annotations/
+  calvin_split:        training # only used when dataset_type=calvin
+  synthetic_episodes:  200      # episodes to generate when no real data provided
+  ep_len:              30       # average episode length for synthetic data
+  img_size:            224      # resize all frames to this square size
+  crop_factor:         0.95     # central crop before resize (matches LT official eval)
+
+# ── Supervised Fine-Tuning (Behavioural Cloning) ──────────────────────────────
+training:
+  device:                auto   # "cuda" | "mps" | "cpu" | "auto"
+  epochs:                80     # enough for LT; early stopping fires if no improvement
+  batch_size:            32
+  lr:                    3e-4
+  lr_min:                1e-6
+  weight_decay:          5e-4   # raised from 1e-4 to reduce overfitting with 96M params
+  label_smoothing:       0.05   # prevents overconfidence in BC phase
+  grad_clip:             1.0
+  closed_loop_dropout:   0.35   # zero action/reward history during training (matches rollout drift)
+  val_fraction:          0.1
+  split_seed:            42    # fixed seed for episode-level train/val split
+  closed_loop_dropout:   0.35   # zero history aug — matches closed-loop rollout
+  num_workers:           2
+  save_every:            10
+  output_dir:            checkpoints/
+  early_stopping_patience: 25   # stop after N epochs with no val_acc improvement
+  clip_vision_lr:        3e-6   # LR for CLIP vision — 10× smaller than before.
+                                 # 1.5e-5 caused severe overfitting (train 0.91 vs
+                                 # val 0.55 at epoch 40). 3e-6 gives slow domain
+                                 # adaptation without memorising training episodes.
+
+# ── Online RL Fine-Tuning ──────────────────────────────────────────────────────
+rl:
+  epochs:              200
+  num_rollouts:        8         # episodes accumulated before ONE gradient update (was 4)
+                                 # more rollouts = lower gradient variance = more stable learning
+  max_episode_steps:   50
+  gamma:               0.99      # discount factor
+  lr:                  1e-5      # lower than SFT to prevent catastrophic forgetting
+  weight_decay:        1e-4
+  grad_clip:           1.0
+  entropy_coef:        0.02      # exploration bonus (raised from 0.01 for more exploration)
+  vf_coef:             0.5       # value function loss weight
+  kl_coef:             0.02      # KL penalty (reduced from 0.1 — high KL blocked sim adaptation)
+  kl_warmup_epochs:    20        # epochs before KL penalty reaches full kl_coef value
+                                 # lets policy first adapt to sim domain before regularisation
+
+# ── Environment ────────────────────────────────────────────────────────────────
+env:
+  env_id:               language_table   # "dummy" | "language_table" | any Gym env id
+  action_magnitude:     0.03             # continuous step size for LT (metres per step)
+  seed:                 0
+  domain_randomization: false
+  obs_noise_std:        5.0
+
+# ── Evaluation ─────────────────────────────────────────────────────────────────
+eval:
+  num_episodes:      50
+  success_threshold: 1.0         # min total return to count as success
+
+# ── Ablation Study Presets ─────────────────────────────────────────────────────
+# To run an ablation, override the vera section from the command line or
+# create a separate config file that inherits these defaults.
+#
+# Ablation A — base VLA (no language feedback):
+#   vera.use_lang_feedback: false
+#
+# Ablation B — no temporal history transformer:
+#   vera.use_temporal_history: false
+#
+# Ablation C — no reward gate:
+#   vera.use_reward_gate: false
+#
+# Ablation D — no contrastive alignment loss:
+#   vera.alignment_loss_coef: 0.0
+#
+# Ablation E — no language feedback AND no temporal history (minimal model):
+#   vera.use_lang_feedback: false
+#   vera.use_temporal_history: false
+#
+# Ablation F — action token only, no consequence token (original Stream 3):
+#   vera.use_consequence_token: false
+#
+# Ablation G — consequence token only, no action token (isolate outcome signal):
+#   vera.use_lang_feedback: true
+#   vera.use_consequence_token: true
+#   action_vocab: null   # action token still present; consequence ablated separately above
+
+# ── Dataset Presets ─────────────────────────────────────────────────────────────
+# Language-Table is the DEFAULT above.  To switch to other datasets, override:
+#
+# MetaWorld (generic pick-place):
+#   data:
+#     episodes_path:    /path/to/metaworld.pkl
+#     dataset_type:     pkl
+#   model:
+#     action_dim:       4       # [Δx, Δy, Δz, gripper]
+#   vera:
+#     action_vocab:     null    # use built-in generic "I performed action N"
+#
+# CALVIN:
+#   data:
+#     episodes_path:    /path/to/calvin_root   # dir with training/ and validation/
+#     dataset_type:     calvin
+#     calvin_split:     training
+#   model:
+#     num_actions:      8       # 8 dominant-axis bins (xyz roll pitch yaw + gripper)
+#     action_dim:       7       # full 7-DoF [x,y,z,roll,pitch,yaw,gripper]
+#   vera:
+#     action_vocab:     null
+#
+# Synthetic (pipeline testing only — no real robot data):
+#   data:
+#     episodes_path:    null
+#     dataset_type:     pkl
+#   model:
+#     action_dim:       4
+#   vera:
+#     action_vocab:     null
+#
+# Run command (any dataset):
+#   python -m training.sft_trainer_vera --config configs/config.yaml
