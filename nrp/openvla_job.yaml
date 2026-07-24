@@ -99,7 +99,7 @@ metadata:
     app: openvla-lt
     seed: "42"
 spec:
-  backoffLimit: 1
+  backoffLimit: 10
   template:
     metadata:
       labels:
@@ -177,7 +177,7 @@ metadata:
     app: openvla-lt
     seed: "123"
 spec:
-  backoffLimit: 1
+  backoffLimit: 10
   template:
     metadata:
       labels:
@@ -255,7 +255,7 @@ metadata:
     app: openvla-lt
     seed: "456"
 spec:
-  backoffLimit: 1
+  backoffLimit: 10
   template:
     metadata:
       labels:
