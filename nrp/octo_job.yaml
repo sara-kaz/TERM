@@ -27,18 +27,24 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    # Install TFDS without --upgrade: satisfies the requirement using whatever
-    # version is compatible with the image's TF (avoids protobuf conflicts).
-    # Pin TFDS to <4.9.0: later versions pull in tensorflow-metadata>=1.14 which
-    # requires protobuf>=5.26 — that conflicts with TF 2.15's protobuf 4.x.
+    # Lock TFDS/protobuf FIRST — later steps must not upgrade these.
+    # TFDS 4.9+ pulls in tensorflow-metadata>=1.14 which requires protobuf>=5.26,
+    # but TF 2.15 (in this image) uses protobuf 4.x.
     pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
-    # dlimp must come before octo (octo imports it but doesn't list it as a dep)
+
+    # TFP 0.24+ requires TF>=2.18; image has TF 2.15. Pin to 0.23.x.
+    pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+
+    # Explicitly install ALL of octo's transitive deps before installing octo
+    # from git — pip sometimes skips them when resolving a git-URL package.
+    pip install --quiet distrax einops "ml-collections" absl-py matplotlib
+
+    # dlimp is imported by octo but not in its setup.py — must install before octo.
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
-    # Do NOT install jax[cuda12_pip] — the NVIDIA JAX image ships a custom CUDA
-    # build; reinstalling it from PyPI overwrites that and can break GPU support.
-    # Pin TFP to <0.24: that version requires TF>=2.18, but JAX image has TF 2.15.
-    # distrax only requires TFP>=0.22, so 0.23.x works.
-    pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0" distrax
+
+    # Install octo — all deps above are already in place so no surprises.
+    # Do NOT add jax[cuda12_pip]: the NVIDIA JAX image has a custom CUDA build;
+    # reinstalling it from PyPI would overwrite that.
     pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml numpy
 
     echo "=== Installing git ==="
