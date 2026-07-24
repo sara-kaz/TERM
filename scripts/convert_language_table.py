@@ -59,6 +59,9 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+from PIL import Image as PILImage
+
+_TARGET_SIZE = (224, 224)  # resize all frames to this to keep storage manageable
 
 
 def convert(tfds_dir: str, out_dir: str, split: str, max_eps: int):
@@ -98,6 +101,8 @@ def convert(tfds_dir: str, out_dir: str, split: str, max_eps: int):
             if frame is None:
                 continue
             frame = frame.numpy().astype(np.uint8)
+            if frame.shape[:2] != _TARGET_SIZE:
+                frame = np.array(PILImage.fromarray(frame).resize(_TARGET_SIZE, PILImage.BILINEAR), dtype=np.uint8)
 
             instr_bytes = obs.get("instruction", b"complete the task")
             if hasattr(instr_bytes, "numpy"):
