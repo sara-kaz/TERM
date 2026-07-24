@@ -44,8 +44,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from PIL import Image
 
-from transformers import AutoModelForVision2Seq, AutoProcessor
-from peft import LoraConfig, get_peft_model, TaskType
+from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.trajectory_dataset import load_episodes
@@ -252,14 +252,29 @@ def main():
     if is_main:
         print(f"[model] Loading {args.model_id} …")
     processor = AutoProcessor.from_pretrained(args.model_id, trust_remote_code=True)
-    # Load directly onto target device — avoids the .to(device) copy that
-    # temporarily doubles peak memory and causes OOM on 40 GB GPUs.
+
+    # 4-bit QLoRA: backbone stored in NF4, compute in bfloat16.
+    # GPU footprint: ~4 GB vs ~15 GB for bfloat16 full precision.
+    # This lets the job run on any NRP GPU (V100 16 GB, A40, A100, etc.)
+    # without requesting a specific node type.
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
     model = AutoModelForVision2Seq.from_pretrained(
         args.model_id,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True,
+        quantization_config=bnb_config,
         device_map={"": device},
+        trust_remote_code=True,
+    )
+
+    # Prepares the frozen 4-bit backbone for gradient flow through LoRA adapters:
+    # casts LayerNorm to float32 and enables gradient checkpointing.
+    model = prepare_model_for_kbit_training(
+        model,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     # ── Apply LoRA ────────────────────────────────────────────────────────────
@@ -272,7 +287,8 @@ def main():
         bias="none",
     )
     model = get_peft_model(model, lora_cfg)
-    # model already on device via device_map — no .to(device) needed
+    # device_map placed model on GPU; prepare_model_for_kbit_training enables
+    # grad checkpointing — no .to(device) and no GradScaler needed.
     if is_main:
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total     = sum(p.numel() for p in model.parameters())
@@ -311,7 +327,6 @@ def main():
     best_val_acc = 0.0
     patience_ctr = 0
     results = {"train_acc": [], "val_acc": [], "seed": args.seed}
-    scaler  = torch.cuda.amp.GradScaler()
 
     if is_main:
         print(f"\n[train] {args.epochs} epochs | bs={args.batch_size} | lr={args.lr}")
@@ -336,12 +351,11 @@ def main():
                              pixel_values=pixel_values, labels=labels)
                 loss = out.loss
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            # bfloat16 has float32 dynamic range — no GradScaler needed.
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 [p for p in model.parameters() if p.requires_grad], 1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             scheduler.step()
             trn_loss_sum += loss.item()
 
