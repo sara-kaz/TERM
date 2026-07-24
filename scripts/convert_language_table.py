@@ -75,12 +75,8 @@ def convert(tfds_dir: str, out_dir: str, split: str, max_eps: int):
     out_root.mkdir(parents=True, exist_ok=True)
 
     print(f"[convert] Loading Language-Table/{split} from {tfds_dir} ...")
-    ds = tfds.load(
-        "language_table",
-        split=split,
-        data_dir=tfds_dir,
-        with_info=False,
-    )
+    builder = tfds.builder_from_directory(tfds_dir)
+    ds = builder.as_dataset(split=split)
 
     ep_idx = 0
     for episode in ds:
