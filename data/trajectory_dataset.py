@@ -57,7 +57,6 @@ from typing import List, Dict, Optional
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import clip
 from PIL import Image
 import torchvision.transforms as T
 
@@ -672,6 +671,7 @@ class TrajectoryDataset(Dataset):
                   f"history_len+1={min_len} steps.")
 
         # Pre-tokenize all unique instructions (truncate=True for CLIP 77-token cap)
+        import clip  # lazy import — only needed when constructing TrajectoryDataset
         unique_inst  = [_normalize_instruction_text(ep["instruction"]) for ep in episodes]
         unique_inst  = list(dict.fromkeys(unique_inst))  # preserve order, dedupe
         tokens       = clip.tokenize(unique_inst, truncate=True)
