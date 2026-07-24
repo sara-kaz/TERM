@@ -27,6 +27,7 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
+    pip install --quiet "git+https://github.com/kvablack/dlimp.git"
     pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex \
         "jax[cuda12_pip]" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
