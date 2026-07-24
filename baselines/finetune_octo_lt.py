@@ -33,6 +33,14 @@ import jax.numpy as jnp
 import flax.linen as nn
 import optax
 
+# JAX 0.4.24 removed jax.random.KeyArray and PRNGKeyArray (replaced by jax.Array).
+# Patch before octo is imported — octo/utils/typing.py line 5 still references
+# the old names, and the NVIDIA JAX 24.04 image ships JAX 0.4.26+.
+if not hasattr(jax.random, "KeyArray"):
+    jax.random.KeyArray = jax.Array
+if not hasattr(jax.random, "PRNGKeyArray"):
+    jax.random.PRNGKeyArray = jax.Array
+
 # ── Octo ──────────────────────────────────────────────────────────────────────
 from octo.model.octo_model import OctoModel
 
