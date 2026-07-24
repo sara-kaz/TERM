@@ -52,7 +52,9 @@ data:
             --max_eps  3000
 
         echo "=== Packing episodes into flat pkl ==="
-        python3 -c "import sys; sys.path.insert(0, '/workspace/TERM'); from data.trajectory_dataset import load_language_table, save_episodes; eps = load_language_table('/data/lt_vera'); save_episodes(eps, '/data/language_table_episodes.pkl'); print('Packed', len(eps), 'episodes')"
+        python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+            --lt_dir /data/lt_vera \
+            --out    /data/language_table_episodes.pkl
     fi
 
     echo "=== Starting Octo fine-tuning (seed=${SEED}) ==="
