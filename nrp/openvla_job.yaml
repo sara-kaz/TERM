@@ -28,7 +28,7 @@ data:
 
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet --upgrade \
-        "transformers>=4.40.0" \
+        "transformers>=4.40.0,<4.45.0" \
         "peft>=0.10.0" \
         "accelerate>=0.29.0" \
         bitsandbytes timm \
