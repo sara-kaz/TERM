@@ -57,6 +57,9 @@ data:
         python3 /workspace/TERM/scripts/pack_lt_episodes.py \
             --lt_dir /data/lt_vera \
             --out    /data/language_table_episodes.pkl
+
+        echo "=== Freeing intermediate dirs ==="
+        rm -rf /data/lt_vera
     fi
 
     echo "=== Starting OpenVLA LoRA fine-tuning (seed=${SEED}, GPUs=${NUM_GPUS}) ==="
@@ -152,7 +155,7 @@ spec:
           defaultMode: 0755
       - name: data-vol
         emptyDir:
-          sizeLimit: "20Gi"
+          sizeLimit: "50Gi"
       - name: ckpt-vol
         emptyDir:
           sizeLimit: "30Gi"
@@ -230,7 +233,7 @@ spec:
           defaultMode: 0755
       - name: data-vol
         emptyDir:
-          sizeLimit: "20Gi"
+          sizeLimit: "50Gi"
       - name: ckpt-vol
         emptyDir:
           sizeLimit: "30Gi"
@@ -308,7 +311,7 @@ spec:
           defaultMode: 0755
       - name: data-vol
         emptyDir:
-          sizeLimit: "20Gi"
+          sizeLimit: "50Gi"
       - name: ckpt-vol
         emptyDir:
           sizeLimit: "30Gi"
