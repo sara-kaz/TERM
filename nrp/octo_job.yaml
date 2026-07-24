@@ -36,6 +36,8 @@ data:
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
     # Do NOT install jax[cuda12_pip] — the NVIDIA JAX image ships a custom CUDA
     # build; reinstalling it from PyPI overwrites that and can break GPU support.
+    # distrax is in octo's setup.py but doesn't always auto-install in this env
+    pip install --quiet distrax
     pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml numpy
 
     echo "=== Installing git ==="
