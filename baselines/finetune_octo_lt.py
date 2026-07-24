@@ -83,33 +83,34 @@ def _preprocess_image(frame: np.ndarray) -> np.ndarray:
     return np.array(img, dtype=np.float32) / 255.0
 
 
-def build_windows(episodes, seed: int):
-    """Convert episodes list → flat list of (frames, instruction, action) windows."""
+def build_window_refs(episodes: list, seed: int) -> list:
+    """Return (ep_idx, step_t) index pairs — NO frame data held in RAM.
+
+    build_windows() used to pre-compute all float32 frame stacks (~2.25 MB each),
+    which means 3000 eps × 100 steps × 2.25 MB ≈ 600 GB before training starts.
+    Here we only store two integers per window; frames are loaded on demand.
+    """
     rng = random.Random(seed)
-    windows = []
-    for ep in episodes:
-        frames = ep["frames"]       # (T, H, W, 3)
-        instr  = ep["instruction"]  # str
-        acts   = ep["actions"]      # (T,) int64
-        T      = len(acts)
+    refs = []
+    for ep_idx, ep in enumerate(episodes):
+        T = len(ep["actions"])
         for t in range(NUM_FRAMES - 1, T):
-            # sample 3 equally-spaced frames up to t
-            idxs = [max(0, t - (NUM_FRAMES - 1 - i)) for i in range(NUM_FRAMES)]
-            frame_stack = np.stack([_preprocess_image(frames[i]) for i in idxs])
-            windows.append({
-                "frames":      frame_stack,   # (3, 224, 224, 3)
-                "instruction": instr,
-                "action":      int(acts[t]),
-            })
-    rng.shuffle(windows)
-    return windows
+            refs.append((ep_idx, t))
+    rng.shuffle(refs)
+    return refs
 
 
-def make_batch(windows, idxs):
-    frames = np.stack([windows[i]["frames"] for i in idxs])           # (B,3,224,224,3)
-    instrs = [windows[i]["instruction"] for i in idxs]
-    acts   = np.array([windows[i]["action"] for i in idxs], dtype=np.int32)
-    return frames, instrs, acts
+def make_batch_from_refs(episodes: list, batch_refs: list):
+    """Load and preprocess one batch worth of frames from raw episode arrays."""
+    frames_list, instrs, acts = [], [], []
+    for ep_idx, t in batch_refs:
+        ep   = episodes[ep_idx]
+        idxs = [max(0, t - (NUM_FRAMES - 1 - i)) for i in range(NUM_FRAMES)]
+        frame_stack = np.stack([_preprocess_image(ep["frames"][i]) for i in idxs])
+        frames_list.append(frame_stack)
+        instrs.append(ep["instruction"])
+        acts.append(int(ep["actions"][t]))
+    return np.stack(frames_list), instrs, np.array(acts, dtype=np.int32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,9 +151,9 @@ def main():
     trn_ep = all_episodes[n_val:]
     print(f"[data] {len(trn_ep)} train / {len(val_ep)} val episodes")
 
-    trn_windows = build_windows(trn_ep, seed=args.seed)
-    val_windows = build_windows(val_ep, seed=0)
-    print(f"[data] {len(trn_windows)} train / {len(val_windows)} val windows")
+    trn_refs = build_window_refs(trn_ep, seed=args.seed)
+    val_refs  = build_window_refs(val_ep, seed=0)
+    print(f"[data] {len(trn_refs)} train / {len(val_refs)} val windows (lazy-loaded per batch)")
 
     # ── Load Octo backbone ────────────────────────────────────────────────────
     print(f"[octo] Loading pretrained model from {args.octo_ckpt} …")
@@ -218,14 +219,13 @@ def main():
         t0 = time.time()
 
         # ── Train ─────────────────────────────────────────────────────────────
-        idxs = list(range(len(trn_windows)))
-        random.shuffle(idxs)
+        random.shuffle(trn_refs)
         trn_losses, trn_accs = [], []
-        for s in range(0, len(idxs), args.batch_size):
-            batch_idx = idxs[s: s + args.batch_size]
-            if len(batch_idx) < 2:
+        for s in range(0, len(trn_refs), args.batch_size):
+            batch_refs = trn_refs[s: s + args.batch_size]
+            if len(batch_refs) < 2:
                 continue
-            frames, instrs, acts = make_batch(trn_windows, batch_idx)
+            frames, instrs, acts = make_batch_from_refs(trn_ep, batch_refs)
             feats = extract_features(frames, instrs)
             feats_jax = jnp.array(feats)
             acts_jax  = jnp.array(acts)
@@ -235,11 +235,10 @@ def main():
             trn_accs.append(float(acc))
 
         # ── Validate ──────────────────────────────────────────────────────────
-        val_idxs = list(range(len(val_windows)))
         val_preds, val_labels = [], []
-        for s in range(0, len(val_idxs), args.batch_size):
-            batch_idx = val_idxs[s: s + args.batch_size]
-            frames, instrs, acts = make_batch(val_windows, batch_idx)
+        for s in range(0, len(val_refs), args.batch_size):
+            batch_refs = val_refs[s: s + args.batch_size]
+            frames, instrs, acts = make_batch_from_refs(val_ep, batch_refs)
             feats  = extract_features(frames, instrs)
             logits = head.apply({"params": head_params}, jnp.array(feats), training=False)
             val_preds.extend(np.array(jnp.argmax(logits, -1)).tolist())

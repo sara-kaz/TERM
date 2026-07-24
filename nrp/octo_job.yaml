@@ -124,11 +124,11 @@ spec:
         resources:
           requests:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
           limits:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -195,11 +195,11 @@ spec:
         resources:
           requests:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
           limits:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -266,11 +266,11 @@ spec:
         resources:
           requests:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
           limits:
             cpu: "16"
-            memory: "64Gi"
+            memory: "96Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
