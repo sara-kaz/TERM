@@ -27,7 +27,9 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    pip install --quiet --upgrade protobuf "tensorflow-datasets>=4.9.0" tensorflow
+    # Do NOT upgrade tensorflow or tensorflow-datasets — JAX image ships compatible
+    # versions and upgrading TFDS pulls in tensorflow-metadata that requires
+    # protobuf>=5.26 which then conflicts with the installed TF.
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
     pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex \
         "jax[cuda12_pip]" \

@@ -77,9 +77,21 @@ def convert(tfds_dir: str, out_dir: str, split: str, max_eps: int):
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"[convert] Loading Language-Table/{split} from {tfds_dir} ...")
-    builder = tfds.builder_from_directory(tfds_dir)
-    ds = builder.as_dataset(split=split)
+    # Derive the TFDS data_dir (parent of 'language_table/<version>').
+    # tfds_dir = "gs://gresearch/robotics/language_table/0.0.1"
+    # data_dir must be "gs://gresearch/robotics" so tfds.load finds
+    # language_table/ under it without appending the name again.
+    data_dir = tfds_dir
+    if "/language_table/" in data_dir:
+        data_dir = data_dir[:data_dir.index("/language_table/")]
+
+    print(f"[convert] Loading Language-Table/{split} from {data_dir} ...")
+    ds = tfds.load(
+        "language_table",
+        split=split,
+        data_dir=data_dir,
+        with_info=False,
+    )
 
     ep_idx = 0
     for episode in ds:
