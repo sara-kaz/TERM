@@ -27,7 +27,7 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    pip install --quiet --upgrade \
+    /opt/conda/bin/pip install --quiet --upgrade \
         "transformers>=4.40.0" \
         "peft>=0.10.0" \
         "accelerate>=0.29.0" \
