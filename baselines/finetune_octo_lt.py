@@ -36,9 +36,11 @@ import optax
 # ── Octo ──────────────────────────────────────────────────────────────────────
 from octo.model.octo_model import OctoModel
 
-# ── Shared data utilities from TERM repo ─────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from data.trajectory_dataset import load_episodes
+def load_episodes(path: str):
+    """Load episodes pkl without importing trajectory_dataset (which needs torch)."""
+    import pickle
+    with open(path, "rb") as fh:
+        return pickle.load(fh)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ class DiscreteActionHead(nn.Module):
 # Data preparation
 # ─────────────────────────────────────────────────────────────────────────────
 
-IMG_SIZE = 224
+IMG_SIZE = 256  # octo-small trained on 256×256; patch grid must match
 NUM_FRAMES = 3
 HISTORY_LEN = 4
 
@@ -155,7 +157,8 @@ def main():
     # Dummy forward to get feature dim and initialise head params
     dummy_frames  = np.zeros((1, NUM_FRAMES, IMG_SIZE, IMG_SIZE, 3), dtype=np.float32)
     dummy_instrs  = ["push the star near the moon"]
-    obs_batch = {"image_primary": dummy_frames[:, -1]}   # Octo expects last frame
+    # Octo expects (batch, timestep, H, W, C) — keep the time dim with [-1:]
+    obs_batch = {"image_primary": dummy_frames[:, -1:]}
     task_batch = octo_model.create_tasks(texts=dummy_instrs)
     dummy_out  = octo_model.run_transformer(obs_batch, task_batch, train=False)
     # Extract CLS / readout token from Octo transformer output
@@ -187,10 +190,14 @@ def main():
 
     # ── Helper: extract Octo features for a batch ─────────────────────────────
     def extract_features(frames, instrs):
-        obs   = {"image_primary": frames[:, -1]}           # last frame
+        # Keep time dim: (B, 1, H, W, C) — Octo requires (batch, timestep, H, W, C)
+        obs   = {"image_primary": frames[:, -1:]}
         tasks = octo_model.create_tasks(texts=instrs)
         out   = octo_model.run_transformer(obs, tasks, train=False)
-        return np.array(out["transformer_outputs"]["readout_action"][:, 0])
+        tr = out["transformer_outputs"]
+        if "readout_action" not in tr:
+            raise KeyError(f"readout_action not in transformer_outputs. Keys: {list(tr.keys())}")
+        return np.array(tr["readout_action"][:, 0])
 
     # ── Training loop ─────────────────────────────────────────────────────────
     best_val_acc = 0.0

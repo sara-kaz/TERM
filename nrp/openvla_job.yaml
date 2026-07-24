@@ -32,7 +32,7 @@ data:
         "peft>=0.10.0" \
         "accelerate>=0.29.0" \
         bitsandbytes timm \
-        tensorflow tensorflow-datasets \
+        tensorflow-cpu tensorflow-datasets \
         pillow numpy pyyaml
 
     echo "=== Installing git ==="
@@ -118,7 +118,7 @@ spec:
         - name: SEED
           value: "42"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: HF_HOME
           value: "/hf_cache"
         - name: TRANSFORMERS_CACHE
@@ -129,13 +129,13 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
           limits:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
           mountPath: /scripts
@@ -196,7 +196,7 @@ spec:
         - name: SEED
           value: "123"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: HF_HOME
           value: "/hf_cache"
         - name: TRANSFORMERS_CACHE
@@ -207,13 +207,13 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
           limits:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
           mountPath: /scripts
@@ -274,7 +274,7 @@ spec:
         - name: SEED
           value: "456"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: HF_HOME
           value: "/hf_cache"
         - name: TRANSFORMERS_CACHE
@@ -285,13 +285,13 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
           limits:
-            cpu: "24"
-            memory: "96Gi"
-            nvidia.com/gpu: "2"
+            cpu: "12"
+            memory: "48Gi"
+            nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
           mountPath: /scripts
