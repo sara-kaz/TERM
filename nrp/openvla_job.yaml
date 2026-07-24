@@ -1,0 +1,322 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Job: OpenVLA LoRA fine-tuning on Language-Table
+# Namespace: csun-ehuang-era
+#
+# Runs 3 seeds in parallel. Each pod: 2× A100 (40 GB) with DDP,
+# 24 CPU cores, 96 GB RAM (7B model needs ~35 GB + activations).
+#
+# Deploy:
+#   kubectl apply -f nrp/openvla_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=openvla-lt
+#   kubectl logs -f <pod-name> -n csun-ehuang-era
+#
+# Retrieve results:
+#   kubectl cp <pod-name>:/checkpoints/openvla_lt_s42/results.json ./openvla_s42.json -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openvla-lt-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    pip install --quiet \
+        "transformers>=4.40.0" \
+        "peft>=0.10.0" \
+        "accelerate>=0.29.0" \
+        bitsandbytes timm \
+        tensorflow tensorflow-datasets \
+        pillow numpy pyyaml
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    mkdir -p /workspace
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM || \
+        (cd /workspace/TERM && git pull)
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ -f "${DATA_PKL}" ]; then
+        echo "=== Using pre-uploaded episodes pkl ==="
+    else
+        echo "=== Downloading Language-Table via TFDS (GCS) ==="
+        python /workspace/TERM/scripts/convert_language_table.py \
+            --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+            --out_dir  /data/lt_vera \
+            --max_eps  3000
+
+        echo "=== Packing episodes into flat pkl ==="
+        python3 -c "import sys; sys.path.insert(0, '/workspace/TERM'); from data.trajectory_dataset import load_language_table, save_episodes; eps = load_language_table('/data/lt_vera'); save_episodes(eps, '/data/language_table_episodes.pkl'); print('Packed', len(eps), 'episodes')"
+    fi
+
+    echo "=== Starting OpenVLA LoRA fine-tuning (seed=${SEED}, GPUs=${NUM_GPUS}) ==="
+    cd /workspace/TERM
+
+    if [ "${NUM_GPUS}" -gt 1 ]; then
+        torchrun --nproc_per_node=${NUM_GPUS} -m baselines.finetune_openvla_lt \
+            --data_path /data/language_table_episodes.pkl \
+            --output_dir /checkpoints/openvla_lt_s${SEED} \
+            --seed ${SEED} \
+            --epochs 80 \
+            --batch_size 4 \
+            --lr 2e-4 \
+            --lora_r 16 \
+            --lora_alpha 32 \
+            --patience 25
+    else
+        python -m baselines.finetune_openvla_lt \
+            --data_path /data/language_table_episodes.pkl \
+            --output_dir /checkpoints/openvla_lt_s${SEED} \
+            --seed ${SEED} \
+            --epochs 80 \
+            --batch_size 4 \
+            --lr 2e-4 \
+            --lora_r 16 \
+            --lora_alpha 32 \
+            --patience 25
+    fi
+
+    echo "=== Done. Results: ==="
+    cat /checkpoints/openvla_lt_s${SEED}/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-lt-s42
+  namespace: csun-ehuang-era
+  labels:
+    app: openvla-lt
+    seed: "42"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: openvla-lt
+        seed: "42"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "42"
+        - name: NUM_GPUS
+          value: "2"
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: hf-cache
+          mountPath: /hf_cache
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "30Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-lt-s123
+  namespace: csun-ehuang-era
+  labels:
+    app: openvla-lt
+    seed: "123"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: openvla-lt
+        seed: "123"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "123"
+        - name: NUM_GPUS
+          value: "2"
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: hf-cache
+          mountPath: /hf_cache
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "30Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-lt-s456
+  namespace: csun-ehuang-era
+  labels:
+    app: openvla-lt
+    seed: "456"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: openvla-lt
+        seed: "456"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "456"
+        - name: NUM_GPUS
+          value: "2"
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "24"
+            memory: "96Gi"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: hf-cache
+          mountPath: /hf_cache
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "30Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
