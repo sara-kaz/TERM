@@ -1,0 +1,283 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Job: Octo fine-tuning on Language-Table
+# Namespace: csun-ehuang-era
+#
+# Runs 3 seeds in parallel (one Pod per seed).
+# Each pod: 1× A100 (40 GB), 16 CPU cores, 64 GB RAM.
+#
+# Deploy:
+#   kubectl apply -f nrp/octo_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=octo-lt
+#   kubectl logs -f <pod-name> -n csun-ehuang-era
+#
+# Retrieve results:
+#   kubectl cp <pod-name>:/checkpoints/octo_lt_s42/results.json ./octo_s42.json -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: octo-lt-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    pip install --quiet octo flax optax chex \
+        "jax[cuda12_pip]" \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    pip install --quiet tensorflow tensorflow-datasets \
+        pyyaml pillow numpy
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    mkdir -p /workspace
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM || \
+        (cd /workspace/TERM && git pull)
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ -f "${DATA_PKL}" ]; then
+        echo "=== Using pre-uploaded episodes pkl ==="
+    else
+        echo "=== Downloading Language-Table via TFDS (GCS) ==="
+        python /workspace/TERM/scripts/convert_language_table.py \
+            --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+            --out_dir  /data/lt_vera \
+            --max_eps  3000
+
+        echo "=== Packing episodes into flat pkl ==="
+        python3 -c "import sys; sys.path.insert(0, '/workspace/TERM'); from data.trajectory_dataset import load_language_table, save_episodes; eps = load_language_table('/data/lt_vera'); save_episodes(eps, '/data/language_table_episodes.pkl'); print('Packed', len(eps), 'episodes')"
+    fi
+
+    echo "=== Starting Octo fine-tuning (seed=${SEED}) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_octo_lt \
+        --data_path /data/language_table_episodes.pkl \
+        --output_dir /checkpoints/octo_lt_s${SEED} \
+        --seed ${SEED} \
+        --epochs 80 \
+        --batch_size 32 \
+        --lr 1e-4 \
+        --patience 25
+
+    echo "=== Done. Results: ==="
+    cat /checkpoints/octo_lt_s${SEED}/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-lt-s42
+  namespace: csun-ehuang-era
+  labels:
+    app: octo-lt
+    seed: "42"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: octo-lt
+        seed: "42"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: nvcr.io/nvidia/jax:24.04-py3
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "42"
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: JAX_PLATFORM_NAME
+          value: "gpu"
+        - name: XLA_FLAGS
+          value: ""
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-lt-s123
+  namespace: csun-ehuang-era
+  labels:
+    app: octo-lt
+    seed: "123"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: octo-lt
+        seed: "123"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: nvcr.io/nvidia/jax:24.04-py3
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "123"
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: JAX_PLATFORM_NAME
+          value: "gpu"
+        - name: XLA_FLAGS
+          value: ""
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-lt-s456
+  namespace: csun-ehuang-era
+  labels:
+    app: octo-lt
+    seed: "456"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: octo-lt
+        seed: "456"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: nvcr.io/nvidia/jax:24.04-py3
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: SEED
+          value: "456"
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: JAX_PLATFORM_NAME
+          value: "gpu"
+        - name: XLA_FLAGS
+          value: ""
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "16"
+            memory: "64Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: ckpt-vol
+          mountPath: /checkpoints
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-lt-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "20Gi"
+      - name: ckpt-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
