@@ -252,11 +252,14 @@ def main():
     if is_main:
         print(f"[model] Loading {args.model_id} …")
     processor = AutoProcessor.from_pretrained(args.model_id, trust_remote_code=True)
+    # Load directly onto target device — avoids the .to(device) copy that
+    # temporarily doubles peak memory and causes OOM on 40 GB GPUs.
     model = AutoModelForVision2Seq.from_pretrained(
         args.model_id,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
         trust_remote_code=True,
+        device_map={"": device},
     )
 
     # ── Apply LoRA ────────────────────────────────────────────────────────────
@@ -269,7 +272,7 @@ def main():
         bias="none",
     )
     model = get_peft_model(model, lora_cfg)
-    model.to(device)
+    # model already on device via device_map — no .to(device) needed
     if is_main:
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total     = sum(p.numel() for p in model.parameters())
