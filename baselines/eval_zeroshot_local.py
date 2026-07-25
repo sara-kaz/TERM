@@ -136,6 +136,7 @@ def run_openvla(val_eps, out_dir: Path, batch_size: int = 4):
         prompts = [f"In: What action should the robot take to {i}?\nOut:" for i in buf_i]
         inputs  = processor(text=prompts, images=buf_f, return_tensors="pt",
                             padding="longest", truncation=True, max_length=64).to(device)
+        inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]
         preds = logits[:, action_token_ids].argmax(dim=-1).cpu().tolist()

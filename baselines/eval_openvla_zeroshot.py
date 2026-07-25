@@ -99,6 +99,7 @@ def main():
             truncation=True,
             max_length=64,
         ).to(device)
+        inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]   # (B, vocab)
         action_logits = logits[:, action_token_ids]      # (B, 8)
