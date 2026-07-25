@@ -347,9 +347,9 @@ def main():
 
             optimizer.zero_grad()
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                out  = model(input_ids=input_ids, attention_mask=attention_mask,
+                fwd  = model(input_ids=input_ids, attention_mask=attention_mask,
                              pixel_values=pixel_values, labels=labels)
-                loss = out.loss
+                loss = fwd.loss
 
             # bfloat16 has float32 dynamic range — no GradScaler needed.
             loss.backward()
