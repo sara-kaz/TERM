@@ -126,12 +126,12 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -197,12 +197,12 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -268,12 +268,12 @@ spec:
           value: "/gcs-key/key.json"
         resources:
           requests:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "16"
-            memory: "96Gi"
+            cpu: "8"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
