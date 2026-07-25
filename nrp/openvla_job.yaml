@@ -34,8 +34,8 @@ data:
     # placed 4-bit quantized model, which raises ValueError at from_pretrained.
     /opt/conda/bin/pip install --quiet \
         "torch==2.3.0" "torchvision==0.18.0" \
-        "transformers==4.40.1" "tokenizers==0.19.1" \
-        "peft>=0.10.0" \
+        "transformers>=4.41.0,<4.45.0" \
+        "peft>=0.10.0,<0.12.0" \
         "accelerate>=0.29.0,<0.34.0" \
         bitsandbytes "timm>=0.9.10,<1.0.0" \
         tensorflow-cpu tensorflow-datasets \

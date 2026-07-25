@@ -266,7 +266,7 @@ def main():
     model = AutoModelForVision2Seq.from_pretrained(
         args.model_id,
         quantization_config=bnb_config,
-        device_map="auto",   # "auto" avoids dispatch_model calling .to() on a quantized model
+        device_map={"": 0},  # force all layers onto GPU 0; "auto" triggers dispatch_model .to() which crashes on 4-bit models
         trust_remote_code=True,
     )
 
