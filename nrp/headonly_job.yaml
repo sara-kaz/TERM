@@ -1,0 +1,256 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Jobs: Frozen backbone + MLP head fine-tuning
+# Namespace: csun-ehuang-era
+#
+# Two parallel jobs — one per model, ~20-30 min each.
+#
+# Deploy:
+#   kubectl apply -f nrp/headonly_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=headonly
+#   kubectl logs -f <pod-name> -n csun-ehuang-era
+#
+# Retrieve:
+#   kubectl cp <octo-pod>:/results/results.json  ./octo_headonly.json  -n csun-ehuang-era
+#   kubectl cp <vla-pod>:/results/results.json   ./openvla_headonly.json -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Octo head-only ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: octo-headonly-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
+    pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+    pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
+        "transformers>=4.35.0,<4.41.0" sentencepiece
+    pip install --quiet "git+https://github.com/kvablack/dlimp.git"
+    pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Downloading Language-Table ==="
+      python /workspace/TERM/scripts/convert_language_table.py \
+          --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+          --out_dir  /data/lt_raw --max_eps 3000
+      python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+          --lt_dir /data/lt_raw --out /data/language_table_episodes.pkl
+      rm -rf /data/lt_raw
+    fi
+
+    echo "=== Running Octo head-only fine-tuning ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_headonly \
+        --model      octo \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --val_frac   0.1 \
+        --num_epochs 30
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-headonly
+  namespace: csun-ehuang-era
+  labels:
+    app: headonly
+    model: octo
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: headonly
+        model: octo
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: eval
+        image: nvcr.io/nvidia/jax:24.04-py3
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: JAX_PLATFORM_NAME
+          value: "gpu"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-headonly-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "1Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ── OpenVLA head-only ─────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openvla-headonly-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    /opt/conda/bin/pip install --quiet \
+        "transformers>=4.41.0,<4.45.0" \
+        "accelerate>=0.29.0,<0.34.0" \
+        bitsandbytes "timm>=0.9.10,<1.0.0" \
+        tensorflow-cpu tensorflow-datasets \
+        pillow numpy pyyaml
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Downloading Language-Table ==="
+      python /workspace/TERM/scripts/convert_language_table.py \
+          --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+          --out_dir  /data/lt_raw --max_eps 3000
+      python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+          --lt_dir /data/lt_raw --out /data/language_table_episodes.pkl
+      rm -rf /data/lt_raw
+    fi
+
+    echo "=== Running OpenVLA head-only fine-tuning ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_headonly \
+        --model      openvla \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --val_frac   0.1 \
+        --num_epochs 30 \
+        --batch_size 8
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-headonly
+  namespace: csun-ehuang-era
+  labels:
+    app: headonly
+    model: openvla
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: headonly
+        model: openvla
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: eval
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "20Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "20Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: hf-cache
+          mountPath: /hf_cache
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-headonly-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "1Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
