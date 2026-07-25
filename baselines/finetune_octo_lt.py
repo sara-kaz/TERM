@@ -172,7 +172,7 @@ def main():
     pad_mask   = jnp.ones((1, 1), dtype=bool)
     dummy_out  = octo_model.run_transformer(obs_batch, task_batch, pad_mask, train=False)
     # run_transformer returns the transformer output dict directly (no 'transformer_outputs' wrapper)
-    dummy_feat = dummy_out["readout_action"][:, 0]   # (B, D)
+    dummy_feat = dummy_out["readout_action"].tokens[:, 0]   # TokenGroup.tokens is (B, seq, D)
 
     key, init_key = jax.random.split(key)
     head_vars = head.init(init_key, dummy_feat, training=False)
@@ -207,7 +207,7 @@ def main():
         out = octo_model.run_transformer(obs, tasks, pad_mask, train=False)
         if "readout_action" not in out:
             raise KeyError(f"readout_action not in transformer output. Keys: {list(out.keys())}")
-        return np.array(out["readout_action"][:, 0])
+        return np.array(out["readout_action"].tokens[:, 0])
 
     # ── Training loop ─────────────────────────────────────────────────────────
     best_val_acc = 0.0
