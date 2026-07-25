@@ -27,7 +27,11 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    /opt/conda/bin/pip install --quiet --upgrade \
+    # Pin torch+torchvision to the image version FIRST so pip cannot upgrade them.
+    # Without pins, --upgrade resolves a newer torch and breaks the pre-built
+    # torchvision C-ext (torchvision::nms does not exist error).
+    /opt/conda/bin/pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
         "transformers>=4.40.0,<4.45.0" \
         "peft>=0.10.0" \
         "accelerate>=0.29.0" \

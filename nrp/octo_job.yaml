@@ -37,7 +37,7 @@ data:
 
     # Explicitly install ALL of octo's transitive deps before installing octo
     # from git — pip sometimes skips them when resolving a git-URL package.
-    pip install --quiet distrax einops "ml-collections" absl-py matplotlib
+    pip install --quiet distrax einops "ml-collections" absl-py matplotlib huggingface_hub
 
     # dlimp is imported by octo but not in its setup.py — must install before octo.
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
