@@ -64,7 +64,7 @@ def extract_octo(episodes, ckpt="hf://rail-berkeley/octo-small"):
             task  = model.create_tasks(texts=[ep["instruction"]])
             pad_mask = jnp.ones((1, 1), dtype=bool)
 
-            out = model.octo_transformer(obs, task, pad_mask, train=False)
+            out = model.run_transformer(obs, task, pad_mask, train=False)
             # readout_action.tokens: (batch, window, num_tokens, d_model)
             tok = np.array(out["readout_action"].tokens[0, 0])   # (num_tokens, d_model)
             embs.append(tok.flatten())
