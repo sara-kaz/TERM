@@ -171,8 +171,8 @@ def main():
     task_batch = octo_model.create_tasks(texts=dummy_instrs)
     pad_mask   = jnp.ones((1, 1), dtype=bool)
     dummy_out  = octo_model.run_transformer(obs_batch, task_batch, pad_mask, train=False)
-    # Extract CLS / readout token from Octo transformer output
-    dummy_feat = dummy_out["transformer_outputs"]["readout_action"][:, 0]   # (B, D)
+    # run_transformer returns the transformer output dict directly (no 'transformer_outputs' wrapper)
+    dummy_feat = dummy_out["readout_action"][:, 0]   # (B, D)
 
     key, init_key = jax.random.split(key)
     head_vars = head.init(init_key, dummy_feat, training=False)
@@ -204,11 +204,10 @@ def main():
         obs      = {"image_primary": frames[:, -1:]}
         tasks    = octo_model.create_tasks(texts=instrs)
         pad_mask = jnp.ones((frames.shape[0], 1), dtype=bool)
-        out      = octo_model.run_transformer(obs, tasks, pad_mask, train=False)
-        tr = out["transformer_outputs"]
-        if "readout_action" not in tr:
-            raise KeyError(f"readout_action not in transformer_outputs. Keys: {list(tr.keys())}")
-        return np.array(tr["readout_action"][:, 0])
+        out = octo_model.run_transformer(obs, tasks, pad_mask, train=False)
+        if "readout_action" not in out:
+            raise KeyError(f"readout_action not in transformer output. Keys: {list(out.keys())}")
+        return np.array(out["readout_action"][:, 0])
 
     # ── Training loop ─────────────────────────────────────────────────────────
     best_val_acc = 0.0
