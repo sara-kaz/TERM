@@ -77,7 +77,8 @@ def main():
         T = len(ep["actions"])
         for t in range(T):
             frame    = preprocess(ep["frames"][t])
-            obs      = {"image_primary": frame[None, None]}   # (1, 1, H, W, 3)
+            obs      = {"image_primary": frame[None, None],
+                       "timestep_pad_mask": jnp.ones((1, 1), dtype=bool)}
             task     = model.create_tasks(texts=[ep["instruction"]])
             pad_mask = jnp.ones((1, 1), dtype=bool)
             key, rng = jax.random.split(key)

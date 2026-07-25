@@ -68,7 +68,8 @@ def run_octo(val_eps, out_dir: Path):
     for ep_idx, ep in enumerate(val_eps):
         for t in range(len(ep["actions"])):
             img = Image.fromarray(ep["frames"][t]).resize((256, 256), Image.BILINEAR)
-            obs = {"image_primary": np.array(img, dtype=np.float32)[None, None] / 255.0}
+            obs = {"image_primary": np.array(img, dtype=np.float32)[None, None] / 255.0,
+                   "timestep_pad_mask": jnp.ones((1, 1), dtype=bool)}
             task     = model.create_tasks(texts=[ep["instruction"]])
             key, rng = jax.random.split(key)
             actions  = model.sample_actions(obs, task, rng=rng)
