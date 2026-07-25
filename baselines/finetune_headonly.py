@@ -16,9 +16,8 @@ import random
 from pathlib import Path
 
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 from PIL import Image
 
 NUM_BINS     = 8
@@ -26,19 +25,6 @@ IMG_OCTO     = 256
 IMG_VLA      = 224
 
 
-# ── MLP head ──────────────────────────────────────────────────────────────────
-
-class MLPHead(nn.Module):
-    def __init__(self, d_in, num_classes=NUM_BINS):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(d_in, 256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, 64),   nn.ReLU(),
-            nn.Linear(64, num_classes),
-        )
-
-    def forward(self, x):
-        return self.net(x)
 
 
 # ── Data ──────────────────────────────────────────────────────────────────────
@@ -93,6 +79,7 @@ def extract_octo(episodes, ckpt="hf://rail-berkeley/octo-small"):
 # ── OpenVLA embedding extraction ──────────────────────────────────────────────
 
 def extract_openvla(episodes, model_id="openvla/openvla-7b", batch_size=8):
+    import torch
     from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -140,41 +127,26 @@ def extract_openvla(episodes, model_id="openvla/openvla-7b", batch_size=8):
     return np.concatenate(embs, axis=0).astype(np.float32), np.array(all_bins, dtype=np.int64)
 
 
-# ── MLP training ──────────────────────────────────────────────────────────────
+# ── MLP training (sklearn — works in JAX and PyTorch images alike) ────────────
 
-def train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, num_epochs=30, lr=1e-3):
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    head    = MLPHead(d_in).to(device)
-    opt     = torch.optim.Adam(head.parameters(), lr=lr, weight_decay=1e-4)
-    sched   = torch.optim.lr_scheduler.CosineAnnealingLR(opt, num_epochs)
-    loss_fn = nn.CrossEntropyLoss()
+def train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, num_epochs=200, **_):
+    print(f"[mlp] Fitting MLP ({d_in}→256→64→8), {num_epochs} max iters ...")
+    scaler   = StandardScaler()
+    tr_scaled = scaler.fit_transform(tr_emb)
+    vl_scaled = scaler.transform(vl_emb)
 
-    tr_dl = DataLoader(
-        TensorDataset(torch.from_numpy(tr_emb), torch.from_numpy(tr_lbl)),
-        batch_size=512, shuffle=True,
+    clf = MLPClassifier(
+        hidden_layer_sizes=(256, 64),
+        activation="relu",
+        solver="adam",
+        max_iter=num_epochs,
+        random_state=42,
+        verbose=False,
     )
-    X_val = torch.from_numpy(vl_emb).to(device)
-    Y_val = torch.from_numpy(vl_lbl).to(device)
-
-    best_acc = 0.0
-    for ep in range(1, num_epochs + 1):
-        head.train()
-        for X, Y in tr_dl:
-            X, Y = X.to(device), Y.to(device)
-            opt.zero_grad()
-            loss_fn(head(X), Y).backward()
-            opt.step()
-        sched.step()
-
-        head.eval()
-        with torch.no_grad():
-            acc = (head(X_val).argmax(1) == Y_val).float().mean().item()
-        best_acc = max(best_acc, acc)
-        if ep % 5 == 0:
-            print(f"  epoch {ep:3d}/{num_epochs}  val={acc*100:.2f}%  best={best_acc*100:.2f}%")
-
-    print(f"\n[mlp] Best val acc: {best_acc*100:.2f}%")
-    return best_acc
+    clf.fit(tr_scaled, tr_lbl)
+    acc = clf.score(vl_scaled, vl_lbl)
+    print(f"[mlp] Val acc: {acc*100:.2f}%  (iters run: {clf.n_iter_})")
+    return acc
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

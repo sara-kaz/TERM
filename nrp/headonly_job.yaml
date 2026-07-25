@@ -33,7 +33,7 @@ data:
     pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
         "transformers>=4.35.0,<4.41.0" sentencepiece
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
-    pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+    pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml scikit-learn
 
     echo "=== Installing git ==="
     apt-get update -qq && apt-get install -y -qq git
@@ -149,7 +149,7 @@ data:
         "accelerate>=0.29.0,<0.34.0" \
         bitsandbytes "timm>=0.9.10,<1.0.0" \
         tensorflow-cpu tensorflow-datasets \
-        pillow numpy pyyaml
+        pillow numpy pyyaml scikit-learn
 
     echo "=== Installing git ==="
     apt-get update -qq && apt-get install -y -qq git
