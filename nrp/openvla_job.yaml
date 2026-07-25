@@ -27,14 +27,16 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    # Pin torch+torchvision to the image version FIRST so pip cannot upgrade them.
-    # Without pins, --upgrade resolves a newer torch and breaks the pre-built
-    # torchvision C-ext (torchvision::nms does not exist error).
+    # Pin torch+torchvision so pip cannot upgrade the pre-built C-ext in the image
+    # (torchvision::nms mismatch if torch is bumped to 2.4+).
+    # Pin transformers==4.40.1 exactly: the openvla-7b checkpoint requires it and
+    # transformers>=4.42 regressed dispatch_model — it calls .to() on an already-
+    # placed 4-bit quantized model, which raises ValueError at from_pretrained.
     /opt/conda/bin/pip install --quiet \
         "torch==2.3.0" "torchvision==0.18.0" \
-        "transformers>=4.40.0,<4.45.0" \
+        "transformers==4.40.1" "tokenizers==0.19.1" \
         "peft>=0.10.0" \
-        "accelerate>=0.29.0" \
+        "accelerate>=0.29.0,<0.34.0" \
         bitsandbytes "timm>=0.9.10,<1.0.0" \
         tensorflow-cpu tensorflow-datasets \
         pillow numpy pyyaml
