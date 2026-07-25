@@ -61,7 +61,7 @@ def main():
     bnb_cfg   = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
     )
     model = AutoModelForVision2Seq.from_pretrained(
@@ -99,7 +99,7 @@ def main():
             truncation=True,
             max_length=64,
         ).to(device)
-        inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+        inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]   # (B, vocab)
         action_logits = logits[:, action_token_ids]      # (B, 8)
