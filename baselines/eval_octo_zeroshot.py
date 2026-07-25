@@ -82,9 +82,7 @@ def main():
             pad_mask = jnp.ones((1, 1), dtype=bool)
             key, rng = jax.random.split(key)
 
-            actions = model.sample_actions(
-                obs, task, rng=rng, unnormalize_actions=False
-            )
+            actions = model.sample_actions(obs, task, rng=rng)
             # shape: (1, horizon, action_dim) — take first horizon step, first 2 dims
             act_xy   = np.array(actions[0, 0, :2])
             pred_bin = discretise(act_xy)
