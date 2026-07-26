@@ -1,0 +1,345 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Jobs: CALVIN D→D fine-tuning baselines (seed 42)
+# Namespace: csun-ehuang-era
+#
+# Data: CALVIN task_D_D (~88 GB unpacked).
+#   The script tries GCS first (fast if pre-staged) then falls back to the
+#   CALVIN server (~1–2 hr download). Pre-stage with:
+#     gsutil -m cp -r /path/to/task_D_D  gs://<YOUR_BUCKET>/data/calvin_task_D_D/
+#   then set GCS_CALVIN_PREFIX in each Job below.
+#
+# Octo:    full backbone fine-tune (backbone lr=1e-5, head lr=1e-4), 14 bins
+# OpenVLA: LoRA fine-tune (r=16, q/v), 4-bit QLoRA, 14 bins
+#
+# Deploy (after LT finishes):
+#   kubectl apply -f nrp/finetune_calvin_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=finetune-calvin
+#   kubectl logs -f <pod-name> -n csun-ehuang-era
+#
+# Retrieve results:
+#   kubectl cp <octo-pod>:/results/results.json    ./octo_calvin_s42.json   -n csun-ehuang-era
+#   kubectl cp <openvla-pod>:/results/results.json ./openvla_calvin_s42.json -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Octo CALVIN fine-tune ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: octo-calvin-ft-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
+    pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+    pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
+        "transformers>=4.35.0,<4.41.0" sentencepiece
+    pip install --quiet "git+https://github.com/kvablack/dlimp.git"
+    pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+    pip install --quiet google-cloud-storage
+
+    echo "=== Installing git + wget ==="
+    apt-get update -qq && apt-get install -y -qq git wget
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN task_D_D data ==="
+
+      # Try GCS first (fast — only works if data is pre-staged)
+      GCS_OK=0
+      python3 /workspace/TERM/scripts/gcs_sync.py download \
+          --bucket "${GCS_BUCKET}" \
+          --prefix "${GCS_CALVIN_PREFIX}" \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D \
+        && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS not available — downloading from CALVIN server (~88 GB, ~1-2 hr) ==="
+        mkdir -p /data
+        wget -q -O /data/task_D_D.zip \
+            "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        echo "=== Extracting ==="
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      echo "=== Packing CALVIN episodes ==="
+      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D \
+          --split       training \
+          --out         "${DATA_PKL}"
+    fi
+
+    echo "=== Checking GCS for Octo resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
+
+    echo "=== Running Octo CALVIN end-to-end fine-tuning (seed 42, up to 20 epochs) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_octo_calvin \
+        --data_path   "${DATA_PKL}" \
+        --output_dir  /results \
+        --seed        42 \
+        --epochs      20 \
+        --batch_size  16 \
+        --lr_backbone 1e-5 \
+        --lr_head     1e-4 \
+        --patience    10 \
+        ${RESUME_FLAG}
+
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-calvin-ft
+  namespace: csun-ehuang-era
+  labels:
+    app: finetune-calvin
+    model: octo
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: finetune-calvin
+        model: octo
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: nvcr.io/nvidia/jax:24.04-py3
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: JAX_PLATFORM_NAME
+          value: "gpu"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/octo_calvin_s42"
+        - name: GCS_CALVIN_PREFIX
+          value: "data/calvin_task_D_D"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-calvin-ft-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ── OpenVLA CALVIN LoRA fine-tune ────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openvla-calvin-ft-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    /opt/conda/bin/pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
+        "transformers>=4.41.0,<4.45.0" \
+        "accelerate>=0.29.0,<0.34.0" \
+        bitsandbytes peft \
+        "timm>=0.9.10,<1.0.0" \
+        pillow numpy pyyaml google-cloud-storage
+
+    echo "=== Installing git + wget ==="
+    apt-get update -qq && apt-get install -y -qq git wget
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN task_D_D data ==="
+
+      GCS_OK=0
+      python3 /workspace/TERM/scripts/gcs_sync.py download \
+          --bucket "${GCS_BUCKET}" \
+          --prefix "${GCS_CALVIN_PREFIX}" \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D \
+        && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS not available — downloading from CALVIN server (~88 GB, ~1-2 hr) ==="
+        mkdir -p /data
+        wget -q -O /data/task_D_D.zip \
+            "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        echo "=== Extracting ==="
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      echo "=== Packing CALVIN episodes ==="
+      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D \
+          --split       training \
+          --out         "${DATA_PKL}"
+    fi
+
+    echo "=== Checking GCS for OpenVLA resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key training_state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
+
+    echo "=== Running OpenVLA CALVIN LoRA fine-tuning (seed 42, 5 epochs) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_openvla_calvin \
+        --data_path  "${DATA_PKL}" \
+        --output_dir /results \
+        --seed       42 \
+        --epochs     5 \
+        --batch_size 4 \
+        --lr         2e-4 \
+        --lora_r     16 \
+        --lora_alpha 32 \
+        ${RESUME_FLAG}
+
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-calvin-ft
+  namespace: csun-ehuang-era
+  labels:
+    app: finetune-calvin
+    model: openvla
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: finetune-calvin
+        model: openvla
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/openvla_calvin_s42"
+        - name: GCS_CALVIN_PREFIX
+          value: "data/calvin_task_D_D"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: hf-cache
+          mountPath: /hf_cache
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-calvin-ft-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
