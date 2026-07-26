@@ -311,14 +311,14 @@ data:
     #!/bin/bash
     set -euo pipefail
 
+    echo "=== Installing git (required before pip git+ installs) ==="
+    apt-get update -qq && apt-get install -y -qq git
+
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet \
         "torch==2.3.0" "torchvision==0.18.0" \
         ftfy regex tqdm pillow numpy pyyaml google-cloud-storage
     /opt/conda/bin/pip install --quiet "git+https://github.com/openai/CLIP.git"
-
-    echo "=== Installing git ==="
-    apt-get update -qq && apt-get install -y -qq git
 
     echo "=== Cloning TERM repo ==="
     git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
@@ -440,14 +440,14 @@ data:
     #!/bin/bash
     set -euo pipefail
 
+    echo "=== Installing git (required before pip git+ installs) ==="
+    apt-get update -qq && apt-get install -y -qq git
+
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet \
         "torch==2.3.0" "torchvision==0.18.0" \
         ftfy regex tqdm pillow numpy pyyaml google-cloud-storage
     /opt/conda/bin/pip install --quiet "git+https://github.com/openai/CLIP.git"
-
-    echo "=== Installing git ==="
-    apt-get update -qq && apt-get install -y -qq git
 
     echo "=== Cloning TERM repo ==="
     git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
