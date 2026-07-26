@@ -169,11 +169,12 @@ def evaluate(model, processor, dataloader, device, rank=0):
         inp_ids_trimmed = input_ids[:, :-1]
         attn_trimmed    = attention_mask[:, :-1]
 
-        out = model(
-            input_ids=inp_ids_trimmed,
-            attention_mask=attn_trimmed,
-            pixel_values=pixel_values,
-        )
+        with torch.cuda.amp.autocast(dtype=torch.float16):
+            out = model(
+                input_ids=inp_ids_trimmed,
+                attention_mask=attn_trimmed,
+                pixel_values=pixel_values,
+            )
         # logits over vocabulary at the last position
         last_logits = out.logits[:, -1, :]        # (B, vocab_size)
 
