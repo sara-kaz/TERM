@@ -52,21 +52,18 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    echo "=== Running Octo head-only fine-tuning (seeds 42, 123, 456) ==="
+    echo "=== Running Octo head-only fine-tuning (seed 42) ==="
     cd /workspace/TERM
-    for SEED in 42 123 456; do
-      echo "--- Seed ${SEED} ---"
-      python -m baselines.finetune_headonly \
-          --model      octo \
-          --data_path  /data/language_table_episodes.pkl \
-          --output_dir /results \
-          --val_frac   0.1 \
-          --num_epochs 30 \
-          --seed       ${SEED}
-    done
+    python -m baselines.finetune_headonly \
+        --model      octo \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --val_frac   0.1 \
+        --num_epochs 30 \
+        --seed       42
 
-    echo "=== Results ==="
-    for F in /results/results_s*.json; do echo "$F:"; cat "$F"; echo; done
+    echo "=== Result ==="
+    cat /results/results_s42.json
 
 ---
 apiVersion: batch/v1
@@ -174,22 +171,19 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    echo "=== Running OpenVLA head-only fine-tuning (seeds 42, 123, 456) ==="
+    echo "=== Running OpenVLA head-only fine-tuning (seed 42) ==="
     cd /workspace/TERM
-    for SEED in 42 123 456; do
-      echo "--- Seed ${SEED} ---"
-      python -m baselines.finetune_headonly \
-          --model      openvla \
-          --data_path  /data/language_table_episodes.pkl \
-          --output_dir /results \
-          --val_frac   0.1 \
-          --num_epochs 30 \
-          --batch_size 8 \
-          --seed       ${SEED}
-    done
+    python -m baselines.finetune_headonly \
+        --model      openvla \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --val_frac   0.1 \
+        --num_epochs 30 \
+        --batch_size 8 \
+        --seed       42
 
-    echo "=== Results ==="
-    for F in /results/results_s*.json; do echo "$F:"; cat "$F"; echo; done
+    echo "=== Result ==="
+    cat /results/results_s42.json
 
 ---
 apiVersion: batch/v1
