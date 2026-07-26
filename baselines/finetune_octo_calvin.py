@@ -37,6 +37,13 @@ if not hasattr(jax.random, "KeyArray"):
     jax.random.KeyArray = jax.Array
 if not hasattr(jax.random, "PRNGKeyArray"):
     jax.random.PRNGKeyArray = jax.Array
+# JAX 0.6.0 removed top-level jax.tree_* aliases
+if not hasattr(jax, "tree_map"):
+    jax.tree_map       = jax.tree_util.tree_map
+    jax.tree_leaves    = jax.tree_util.tree_leaves
+    jax.tree_flatten   = jax.tree_util.tree_flatten
+    jax.tree_unflatten = jax.tree_util.tree_unflatten
+    jax.tree_structure = jax.tree_util.tree_structure
 
 from octo.model.octo_model import OctoModel
 
