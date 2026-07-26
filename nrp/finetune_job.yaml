@@ -34,8 +34,7 @@ data:
     echo "=== Installing dependencies ==="
     # Install GPU-enabled JAX from the release server (no version pin so pip finds the
     # cuda12_pip extra defined in the release index, not the CPU-only PyPI package).
-    /opt/conda/bin/pip install --quiet "jax[cuda12_pip]" \
-        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    /opt/conda/bin/pip install --quiet "jax[cuda12]"
     # Verify GPU is visible before spending time downloading data (one-liner avoids YAML indent issues)
     /opt/conda/bin/python -c "import jax,sys; d=jax.devices(); g=[x for x in d if x.platform=='gpu']; print('[jax-verify] jax='+jax.__version__+' gpu='+str(len(g)),flush=True); sys.exit('ERROR: No GPU on this node. devices='+str(d)) if not g else 0"
     /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow

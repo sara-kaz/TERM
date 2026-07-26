@@ -38,8 +38,7 @@ data:
     apt-get update -qq && apt-get install -y -qq git wget unzip
 
     echo "=== Installing dependencies ==="
-    /opt/conda/bin/pip install --quiet "jax[cuda12_pip]" \
-        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    /opt/conda/bin/pip install --quiet "jax[cuda12]"
     /opt/conda/bin/python -c "import jax,sys; d=jax.devices(); g=[x for x in d if x.platform=='gpu']; print('[jax-verify] jax='+jax.__version__+' gpu='+str(len(g)),flush=True); sys.exit('ERROR: No GPU on this node. devices='+str(d)) if not g else 0"
     /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
     /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
