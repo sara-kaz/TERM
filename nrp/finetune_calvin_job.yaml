@@ -38,9 +38,16 @@ data:
     apt-get update -qq && apt-get install -y -qq git wget unzip
 
     echo "=== Installing dependencies ==="
-    /opt/conda/bin/pip install --quiet \
-        "jax==0.4.25" "jaxlib==0.4.25+cuda12.cudnn89" \
+    /opt/conda/bin/pip install --quiet "jax[cuda12_pip]" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    /opt/conda/bin/python -c "
+import jax, sys
+devs = jax.devices()
+gpu  = [d for d in devs if d.platform == 'gpu']
+print(f'[jax-verify] {jax.__version__}  devices={devs}  gpu={len(gpu)}', flush=True)
+if not gpu:
+    sys.exit(f'ERROR: jaxlib installed but no GPU found. devices={devs}')
+"
     /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
     /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
     /opt/conda/bin/pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
@@ -120,7 +127,7 @@ metadata:
     app: finetune-calvin
     model: octo
 spec:
-  backoffLimit: 1
+  backoffLimit: 3
   template:
     metadata:
       labels:
@@ -135,8 +142,6 @@ spec:
         env:
         - name: XLA_PYTHON_CLIENT_PREALLOCATE
           value: "false"
-        - name: JAX_PLATFORM_NAME
-          value: "gpu"
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: "/gcs-key/key.json"
         - name: GCS_BUCKET

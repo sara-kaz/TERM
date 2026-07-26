@@ -170,6 +170,15 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     ckpt_dir = out / "checkpoint"
 
+    _devs = jax.devices()
+    _gpu  = [d for d in _devs if d.platform == "gpu"]
+    print(f"[jax] {jax.__version__}  devices={[str(d) for d in _devs]}  gpu={len(_gpu)}", flush=True)
+    if not _gpu:
+        raise RuntimeError(
+            f"No GPU found on this node. Available: {_devs}. "
+            "Check jaxlib CUDA install or try a different node."
+        )
+
     np.random.seed(args.seed)
     random.seed(args.seed)
     key = jax.random.PRNGKey(args.seed)
