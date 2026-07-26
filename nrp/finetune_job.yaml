@@ -200,13 +200,13 @@ data:
         --state_key training_state.json --dest /results/checkpoint \
       && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
 
-    echo "=== Running OpenVLA LoRA fine-tuning (seed 42, 5 epochs this run) ==="
+    echo "=== Running OpenVLA LoRA fine-tuning (seed 42, 10 epochs this run) ==="
     cd /workspace/TERM
     python -m baselines.finetune_openvla_lt \
         --data_path  /data/language_table_episodes.pkl \
         --output_dir /results \
         --seed       42 \
-        --epochs     5 \
+        --epochs     10 \
         --batch_size 4 \
         --lr         2e-4 \
         --lora_r     16 \
