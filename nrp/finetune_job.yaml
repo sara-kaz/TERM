@@ -73,10 +73,10 @@ data:
         --patience    10 \
         ${RESUME_FLAG}
 
-    echo "=== Uploading checkpoint to GCS ==="
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
     python3 /workspace/TERM/scripts/gcs_sync.py upload \
         --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
-        --src /results/checkpoint
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
 
     echo "=== Result ==="
     cat /results/results.json
@@ -210,10 +210,10 @@ data:
         --lora_alpha 32 \
         ${RESUME_FLAG}
 
-    echo "=== Uploading checkpoint to GCS ==="
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
     python3 /workspace/TERM/scripts/gcs_sync.py upload \
         --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
-        --src /results/checkpoint
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
 
     echo "=== Result ==="
     cat /results/results.json
