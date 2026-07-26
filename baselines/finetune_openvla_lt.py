@@ -47,8 +47,10 @@ from PIL import Image
 from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from data.trajectory_dataset import load_episodes
+def load_episodes(path: str):
+    import pickle
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,7 +162,7 @@ def evaluate(model, processor, dataloader, device, rank=0):
         # We use teacher-forced logits at the last position for speed
         input_ids      = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
-        pixel_values   = batch["pixel_values"].to(device)
+        pixel_values   = batch["pixel_values"].to(device).to(torch.float16)
         gt_bins        = batch["action_bin"].to(device)
 
         # Trim the last token (the answer) and let the model predict it
@@ -260,7 +262,7 @@ def main():
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
     )
     model = AutoModelForVision2Seq.from_pretrained(
@@ -341,12 +343,12 @@ def main():
         for batch in trn_loader:
             input_ids      = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            pixel_values   = batch["pixel_values"].to(device).to(torch.bfloat16)
+            pixel_values   = batch["pixel_values"].to(device).to(torch.float16)
             labels         = batch["labels"].to(device)
             gt_bins        = batch["action_bin"].to(device)
 
             optimizer.zero_grad()
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.cuda.amp.autocast(dtype=torch.float16):
                 fwd  = model(input_ids=input_ids, attention_mask=attention_mask,
                              pixel_values=pixel_values, labels=labels)
                 loss = fwd.loss
