@@ -298,3 +298,261 @@ spec:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
+
+---
+# ── CNN-LSTM Baseline ─────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnn-lstm-ft-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    /opt/conda/bin/pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
+        ftfy regex tqdm pillow numpy pyyaml google-cloud-storage
+    /opt/conda/bin/pip install --quiet "git+https://github.com/openai/CLIP.git"
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Downloading Language-Table ==="
+      /opt/conda/bin/pip install --quiet tensorflow-cpu tensorflow-datasets
+      python /workspace/TERM/scripts/convert_language_table.py \
+          --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+          --out_dir  /data/lt_raw --max_eps 3000
+      python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+          --lt_dir /data/lt_raw --out /data/language_table_episodes.pkl
+      rm -rf /data/lt_raw
+    fi
+
+    echo "=== Checking GCS for resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
+
+    echo "=== Running CNN-LSTM baseline (seed 42, 30 epochs) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_cnn_lstm_lt \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --seed       42 \
+        --epochs     30 \
+        --batch_size 32 \
+        --lr         3e-4 \
+        --patience   10 \
+        ${RESUME_FLAG}
+
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cnn-lstm-ft
+  namespace: csun-ehuang-era
+  labels:
+    app: finetune
+    model: cnn-lstm
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: finetune
+        model: cnn-lstm
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/cnn_lstm_lt_s42"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: cnn-lstm-ft-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "5Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ── NumericalVLA Baseline ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: numvla-ft-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    /opt/conda/bin/pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
+        ftfy regex tqdm pillow numpy pyyaml google-cloud-storage
+    /opt/conda/bin/pip install --quiet "git+https://github.com/openai/CLIP.git"
+
+    echo "=== Installing git ==="
+    apt-get update -qq && apt-get install -y -qq git
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Downloading Language-Table ==="
+      /opt/conda/bin/pip install --quiet tensorflow-cpu tensorflow-datasets
+      python /workspace/TERM/scripts/convert_language_table.py \
+          --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+          --out_dir  /data/lt_raw --max_eps 3000
+      python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+          --lt_dir /data/lt_raw --out /data/language_table_episodes.pkl
+      rm -rf /data/lt_raw
+    fi
+
+    echo "=== Checking GCS for resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
+
+    echo "=== Running NumericalVLA baseline (seed 42, 80 epochs) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_numvla_lt \
+        --data_path  /data/language_table_episodes.pkl \
+        --output_dir /results \
+        --seed       42 \
+        --epochs     80 \
+        --batch_size 32 \
+        --lr         3e-4 \
+        --patience   25 \
+        ${RESUME_FLAG}
+
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: numvla-ft
+  namespace: csun-ehuang-era
+  labels:
+    app: finetune
+    model: numvla
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: finetune
+        model: numvla
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/numvla_lt_s42"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: numvla-ft-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "5Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
