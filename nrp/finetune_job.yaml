@@ -147,12 +147,13 @@ data:
 
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
         "transformers>=4.41.0,<4.45.0" \
         "accelerate>=0.29.0,<0.34.0" \
         bitsandbytes peft \
+        "timm>=0.9.10,<1.0.0" \
         tensorflow-cpu tensorflow-datasets \
         pillow numpy pyyaml
-    /opt/conda/bin/pip install --quiet --no-deps "timm>=0.9.10,<1.0.0"
 
     echo "=== Installing git ==="
     apt-get update -qq && apt-get install -y -qq git
