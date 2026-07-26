@@ -63,7 +63,6 @@ class DiscreteActionHead(nn.Module):
         x = nn.LayerNorm()(x)
         x = nn.Dense(256)(x)
         x = nn.gelu(x)
-        x = nn.Dropout(rate=0.1)(x, deterministic=not training)
         return nn.Dense(self.num_actions)(x)
 
 
