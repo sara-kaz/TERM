@@ -245,7 +245,7 @@ def main():
                 obs, tasks, pad_mask,
                 train=True,
                 rngs={"dropout": rng},
-                method=octo_model.module.run_transformer,
+                method="octo_transformer",
             )
             feat   = out["readout_action"].tokens[:, 0]
             logits = head.apply({"params": params["head"]}, feat, training=True)
@@ -272,7 +272,7 @@ def main():
                 {"params": all_params["backbone"]},
                 obs, tasks, pad_mask,
                 train=False,
-                method=octo_model.module.run_transformer,
+                method="octo_transformer",
             )
             feat   = out["readout_action"].tokens[:, 0]
             logits = head.apply({"params": all_params["head"]}, feat, training=False)
