@@ -86,16 +86,35 @@ def build_window_refs(episodes: list, seed: int) -> list:
     return refs
 
 
-def make_batch_from_refs(episodes, batch_refs, octo_model):
-    frames_list, instrs, acts = [], [], []
+def build_task_cache(octo_model, episodes, chunk_size: int = 64):
+    _ANCHOR = (
+        "move the robotic arm to pick up and relocate "
+        "the target object to the destination zone"
+    )
+    unique_texts = list({ep["instruction"] for ep in episodes})
+    print(f"[tasks] Pre-computing embeddings for {len(unique_texts)} unique instructions …")
+    cache: dict = {}
+    for i in range(0, len(unique_texts), chunk_size):
+        chunk = [_ANCHOR] + unique_texts[i : i + chunk_size]
+        tasks = octo_model.create_tasks(texts=chunk)
+        for j, txt in enumerate(unique_texts[i : i + chunk_size]):
+            cache[txt] = jax.tree_util.tree_map(lambda x: x[j + 1 : j + 2], tasks)
+    print(f"[tasks] Cache built ({len(cache)} entries).")
+    return cache
+
+
+def make_batch_from_refs(episodes, batch_refs, task_cache):
+    frames_list, task_list, acts = [], [], []
     for ep_idx, t in batch_refs:
         ep   = episodes[ep_idx]
         idxs = [max(0, t - (NUM_FRAMES - 1 - i)) for i in range(NUM_FRAMES)]
         frame_stack = np.stack([_preprocess_image(ep["frames"][i]) for i in idxs])
         frames_list.append(frame_stack)
-        instrs.append(ep["instruction"])
+        task_list.append(task_cache[ep["instruction"]])
         acts.append(int(ep["actions"][t]))
-    tasks = octo_model.create_tasks(texts=instrs)
+    tasks = jax.tree_util.tree_map(
+        lambda *arrs: jnp.concatenate(arrs, axis=0), *task_list
+    )
     return np.stack(frames_list), tasks, np.array(acts, dtype=np.int32)
 
 
@@ -171,11 +190,14 @@ def main():
     octo_model = OctoModel.load_pretrained(args.octo_ckpt)
     print("[octo] Backbone loaded.")
 
-    head      = DiscreteActionHead(num_actions=args.num_actions)
-    dummy_obs = {"image_primary": np.zeros((1, 1, IMG_SIZE, IMG_SIZE, 3), np.float32)}
-    dummy_tsk = octo_model.create_tasks(texts=["push the block to the red target"])
-    dummy_msk = jnp.ones((1, 1), dtype=bool)
-    dummy_out = octo_model.run_transformer(dummy_obs, dummy_tsk, dummy_msk, train=False)
+    all_ep = trn_ep + val_ep
+    task_cache = build_task_cache(octo_model, all_ep)
+
+    head = DiscreteActionHead(num_actions=args.num_actions)
+    _sample_task = task_cache[next(iter(task_cache))]
+    dummy_obs  = {"image_primary": np.zeros((1, 1, IMG_SIZE, IMG_SIZE, 3), np.float32)}
+    dummy_msk  = jnp.ones((1, 1), dtype=bool)
+    dummy_out  = octo_model.run_transformer(dummy_obs, _sample_task, dummy_msk, train=False)
     dummy_feat = dummy_out["readout_action"].tokens[:, 0]
 
     key, init_key = jax.random.split(key)
@@ -246,7 +268,7 @@ def main():
         preds_all, labels_all = [], []
         for s in range(0, len(val_refs), args.batch_size):
             batch_refs = val_refs[s: s + args.batch_size]
-            frames, tasks, acts = make_batch_from_refs(val_ep, batch_refs, octo_model)
+            frames, tasks, acts = make_batch_from_refs(val_ep, batch_refs, task_cache)
             obs      = {"image_primary": jnp.array(frames[:, -1:])}
             pad_mask = jnp.ones((frames.shape[0], 1), dtype=bool)
             out = octo_model.module.apply(
@@ -275,7 +297,7 @@ def main():
             batch_refs = trn_refs[s: s + args.batch_size]
             if len(batch_refs) < 2:
                 continue
-            frames, tasks, acts = make_batch_from_refs(trn_ep, batch_refs, octo_model)
+            frames, tasks, acts = make_batch_from_refs(trn_ep, batch_refs, task_cache)
             key, rng = jax.random.split(key)
             all_params, opt_state, loss, acc = train_step(
                 all_params, opt_state,
