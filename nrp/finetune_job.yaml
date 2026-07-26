@@ -35,6 +35,7 @@ data:
         "transformers>=4.35.0,<4.41.0" sentencepiece
     pip install --quiet "git+https://github.com/kvablack/dlimp.git"
     pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+    pip install --quiet google-cloud-storage
 
     echo "=== Installing git ==="
     apt-get update -qq && apt-get install -y -qq git
@@ -53,31 +54,67 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    # ── Resume checkpoint from GCS if available ──────────────────────────────
-    GCS_CKPT="gs://sara-kaz-term/checkpoints/octo_lt_s42"
-    if gsutil -q stat "${GCS_CKPT}/state.json" 2>/dev/null; then
-      echo "=== Resuming Octo from GCS checkpoint ==="
-      mkdir -p /results/checkpoint
-      gsutil -m cp -r "${GCS_CKPT}/" /results/checkpoint/
+    # ── Resume checkpoint from GCS if available (Python API, no gsutil needed) ─
+    GCS_BUCKET="sara-kaz-term"
+    GCS_PREFIX="checkpoints/octo_lt_s42"
+    RESUME_FLAG=""
+    python3 - <<'PYEOF'
+import sys, os
+from google.cloud import storage
+bucket_name = os.environ["GCS_BUCKET"]
+prefix      = os.environ["GCS_PREFIX"]
+dest        = "/results/checkpoint"
+client = storage.Client()
+bucket = client.bucket(bucket_name)
+blobs  = list(bucket.list_blobs(prefix=prefix + "/state.json"))
+if not blobs:
+    print("[gcs] No checkpoint found — starting fresh.")
+    sys.exit(1)
+print("[gcs] Checkpoint found — downloading...")
+os.makedirs(dest, exist_ok=True)
+for blob in bucket.list_blobs(prefix=prefix + "/"):
+    rel        = blob.name[len(prefix)+1:]
+    local_path = os.path.join(dest, rel)
+    os.makedirs(os.path.dirname(local_path) or dest, exist_ok=True)
+    blob.download_to_filename(local_path)
+    print(f"  {rel}")
+sys.exit(0)
+PYEOF
+    if [ $? -eq 0 ]; then
       RESUME_FLAG="--resume_from /results/checkpoint"
-    else
-      RESUME_FLAG=""
     fi
 
-    echo "=== Running Octo fine-tuning to convergence (seed 42, up to 20 epochs) ==="
+    echo "=== Running Octo end-to-end fine-tuning (seed 42, up to 20 epochs) ==="
     cd /workspace/TERM
     python -m baselines.finetune_octo_lt \
-        --data_path  /data/language_table_episodes.pkl \
-        --output_dir /results \
-        --seed       42 \
-        --epochs     20 \
-        --batch_size 16 \
-        --lr         1e-4 \
-        --patience   10 \
+        --data_path   /data/language_table_episodes.pkl \
+        --output_dir  /results \
+        --seed        42 \
+        --epochs      20 \
+        --batch_size  16 \
+        --lr_backbone 1e-5 \
+        --lr_head     1e-4 \
+        --patience    10 \
         ${RESUME_FLAG}
 
     echo "=== Uploading checkpoint to GCS ==="
-    gsutil -m cp -r /results/checkpoint/ "${GCS_CKPT}/"
+    python3 - <<'PYEOF'
+import os
+from google.cloud import storage
+bucket_name = os.environ["GCS_BUCKET"]
+prefix      = os.environ["GCS_PREFIX"]
+src         = "/results/checkpoint"
+client = storage.Client()
+bucket = client.bucket(bucket_name)
+for root, dirs, files in os.walk(src):
+    for fname in files:
+        local_path = os.path.join(root, fname)
+        rel        = os.path.relpath(local_path, src)
+        blob_name  = f"{prefix}/{rel}"
+        bucket.blob(blob_name).upload_from_filename(local_path)
+        print(f"  Uploaded: {rel}")
+print("[gcs] Checkpoint uploaded.")
+PYEOF
 
     echo "=== Result ==="
     cat /results/results.json
@@ -111,14 +148,18 @@ spec:
           value: "gpu"
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/octo_lt_s42"
         resources:
           requests:
             cpu: "4"
-            memory: "24Gi"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
           limits:
             cpu: "4"
-            memory: "24Gi"
+            memory: "32Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -140,7 +181,7 @@ spec:
           sizeLimit: "50Gi"
       - name: results-vol
         emptyDir:
-          sizeLimit: "2Gi"
+          sizeLimit: "5Gi"
       - name: gcs-key
         secret:
           secretName: gcs-key
