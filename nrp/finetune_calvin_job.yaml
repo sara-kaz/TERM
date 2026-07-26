@@ -40,14 +40,7 @@ data:
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet "jax[cuda12_pip]" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-    /opt/conda/bin/python -c "
-import jax, sys
-devs = jax.devices()
-gpu  = [d for d in devs if d.platform == 'gpu']
-print(f'[jax-verify] {jax.__version__}  devices={devs}  gpu={len(gpu)}', flush=True)
-if not gpu:
-    sys.exit(f'ERROR: jaxlib installed but no GPU found. devices={devs}')
-"
+    /opt/conda/bin/python -c "import jax,sys; d=jax.devices(); g=[x for x in d if x.platform=='gpu']; print('[jax-verify] jax='+jax.__version__+' gpu='+str(len(g)),flush=True); sys.exit('ERROR: No GPU on this node. devices='+str(d)) if not g else 0"
     /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
     /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
     /opt/conda/bin/pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
