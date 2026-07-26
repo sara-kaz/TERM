@@ -90,22 +90,19 @@ def build_window_refs(episodes: list, seed: int) -> list:
     return refs
 
 
-def make_batch_from_refs(episodes, batch_refs, task_cache):
-    """Load frames and stack pre-cached task embeddings for one batch."""
-    frames_list, task_list, acts = [], [], []
+def make_batch_from_refs(episodes, batch_refs, octo_model):
+    """Load frames and call create_tasks for one batch."""
+    frames_list, instrs, acts = [], [], []
     for ep_idx, t in batch_refs:
         ep   = episodes[ep_idx]
         idxs = [max(0, t - (NUM_FRAMES - 1 - i)) for i in range(NUM_FRAMES)]
         frame_stack = np.stack([_preprocess_image(ep["frames"][i]) for i in idxs])
         frames_list.append(frame_stack)
-        task_list.append(task_cache[ep["instruction"]])
+        instrs.append(ep["instruction"])
         acts.append(int(ep["actions"][t]))
 
-    # Stack cached task dicts into batch arrays
-    task_keys  = task_list[0].keys()
-    tasks_np   = {k: np.stack([t[k] for t in task_list]) for k in task_keys}
-    tasks_jax  = {k: jnp.array(v) for k, v in tasks_np.items()}
-    return np.stack(frames_list), tasks_jax, np.array(acts, dtype=np.int32)
+    tasks = octo_model.create_tasks(texts=instrs)
+    return np.stack(frames_list), tasks, np.array(acts, dtype=np.int32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,17 +181,8 @@ def main():
     octo_model = OctoModel.load_pretrained(args.octo_ckpt)
     print("[octo] Backbone loaded.")
 
-    # ── Pre-cache task embeddings ─────────────────────────────────────────────
-    # Octo's text processor is separate from backbone module params.
-    # Pre-computing once avoids re-running CLIP/T5 every step and lets us
-    # pass pre-embedded tasks to module.apply with trainable backbone params.
-    print("[tasks] Pre-computing text embeddings for all unique instructions …")
-    unique_instrs = list({ep["instruction"] for ep in all_episodes})
-    task_cache    = {}
-    for instr in unique_instrs:
-        t = octo_model.create_tasks(texts=[instr])
-        task_cache[instr] = {k: np.array(v[0]) for k, v in t.items()}
-    print(f"[tasks] Cached {len(task_cache)} unique instructions.")
+    # Text embeddings are computed per-batch via create_tasks (uses a separate
+    # text processor, not backbone params — safe with backbone fine-tuning).
 
     # ── Classification head ───────────────────────────────────────────────────
     head      = DiscreteActionHead(num_actions=args.num_actions)
@@ -276,7 +264,7 @@ def main():
         preds_all, labels_all = [], []
         for s in range(0, len(val_refs), args.batch_size):
             batch_refs = val_refs[s: s + args.batch_size]
-            frames, tasks, acts = make_batch_from_refs(val_ep, batch_refs, task_cache)
+            frames, tasks, acts = make_batch_from_refs(val_ep, batch_refs, octo_model)
             obs      = {"image_primary": jnp.array(frames[:, -1:])}
             pad_mask = jnp.ones((frames.shape[0], 1), dtype=bool)
             out = octo_model.module.apply(
@@ -306,7 +294,7 @@ def main():
             batch_refs = trn_refs[s: s + args.batch_size]
             if len(batch_refs) < 2:
                 continue
-            frames, tasks, acts = make_batch_from_refs(trn_ep, batch_refs, task_cache)
+            frames, tasks, acts = make_batch_from_refs(trn_ep, batch_refs, octo_model)
             key, rng = jax.random.split(key)
             all_params, opt_state, loss, acc = train_step(
                 all_params, opt_state,
