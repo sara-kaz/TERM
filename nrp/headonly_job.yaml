@@ -52,17 +52,21 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    echo "=== Running Octo head-only fine-tuning ==="
+    echo "=== Running Octo head-only fine-tuning (seeds 42, 123, 456) ==="
     cd /workspace/TERM
-    python -m baselines.finetune_headonly \
-        --model      octo \
-        --data_path  /data/language_table_episodes.pkl \
-        --output_dir /results \
-        --val_frac   0.1 \
-        --num_epochs 30
+    for SEED in 42 123 456; do
+      echo "--- Seed ${SEED} ---"
+      python -m baselines.finetune_headonly \
+          --model      octo \
+          --data_path  /data/language_table_episodes.pkl \
+          --output_dir /results \
+          --val_frac   0.1 \
+          --num_epochs 30 \
+          --seed       ${SEED}
+    done
 
-    echo "=== Result ==="
-    cat /results/results.json
+    echo "=== Results ==="
+    for F in /results/results_s*.json; do echo "$F:"; cat "$F"; echo; done
 
 ---
 apiVersion: batch/v1
@@ -170,18 +174,22 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    echo "=== Running OpenVLA head-only fine-tuning ==="
+    echo "=== Running OpenVLA head-only fine-tuning (seeds 42, 123, 456) ==="
     cd /workspace/TERM
-    python -m baselines.finetune_headonly \
-        --model      openvla \
-        --data_path  /data/language_table_episodes.pkl \
-        --output_dir /results \
-        --val_frac   0.1 \
-        --num_epochs 30 \
-        --batch_size 8
+    for SEED in 42 123 456; do
+      echo "--- Seed ${SEED} ---"
+      python -m baselines.finetune_headonly \
+          --model      openvla \
+          --data_path  /data/language_table_episodes.pkl \
+          --output_dir /results \
+          --val_frac   0.1 \
+          --num_epochs 30 \
+          --batch_size 8 \
+          --seed       ${SEED}
+    done
 
-    echo "=== Result ==="
-    cat /results/results.json
+    echo "=== Results ==="
+    for F in /results/results_s*.json; do echo "$F:"; cat "$F"; echo; done
 
 ---
 apiVersion: batch/v1

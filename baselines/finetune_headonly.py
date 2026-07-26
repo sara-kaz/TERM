@@ -29,10 +29,10 @@ IMG_VLA      = 224
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 
-def split_episodes(path, val_frac=0.1):
+def split_episodes(path, val_frac=0.1, seed=42):
     with open(path, "rb") as f:
         eps = pickle.load(f)
-    random.Random(42).shuffle(eps)
+    random.Random(seed).shuffle(eps)
     n = max(1, int(len(eps) * val_frac))
     return eps[n:], eps[:n]   # train, val
 
@@ -129,8 +129,8 @@ def extract_openvla(episodes, model_id="openvla/openvla-7b", batch_size=8):
 
 # ── MLP training (sklearn — works in JAX and PyTorch images alike) ────────────
 
-def train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, num_epochs=200, **_):
-    print(f"[mlp] Fitting MLP ({d_in}→256→64→8), {num_epochs} max iters ...")
+def train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, num_epochs=200, seed=42, **_):
+    print(f"[mlp] Fitting MLP ({d_in}→256→64→8), {num_epochs} max iters, seed={seed} ...")
     scaler   = StandardScaler()
     tr_scaled = scaler.fit_transform(tr_emb)
     vl_scaled = scaler.transform(vl_emb)
@@ -140,7 +140,7 @@ def train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, num_epochs=200, **_):
         activation="relu",
         solver="adam",
         max_iter=num_epochs,
-        random_state=42,
+        random_state=seed,
         verbose=False,
     )
     clf.fit(tr_scaled, tr_lbl)
@@ -159,6 +159,8 @@ def parse_args():
     p.add_argument("--val_frac",    type=float, default=0.1)
     p.add_argument("--num_epochs",  type=int,   default=30)
     p.add_argument("--batch_size",  type=int,   default=8)
+    p.add_argument("--seed",        type=int,   default=42,
+                   help="Random seed for train/val split and MLP init (use 42, 123, 456 to match TERM)")
     return p.parse_args()
 
 
@@ -167,8 +169,8 @@ def main():
     out  = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    train_eps, val_eps = split_episodes(args.data_path, args.val_frac)
-    print(f"[data] train={len(train_eps)} eps, val={len(val_eps)} eps")
+    train_eps, val_eps = split_episodes(args.data_path, args.val_frac, seed=args.seed)
+    print(f"[data] seed={args.seed}  train={len(train_eps)} eps, val={len(val_eps)} eps")
 
     if args.model == "octo":
         tr_emb, tr_lbl = extract_octo(train_eps)
@@ -182,16 +184,18 @@ def main():
     d_in = tr_emb.shape[1]
     print(f"\n[emb] d_in={d_in}  train_steps={len(tr_lbl)}  val_steps={len(vl_lbl)}")
 
-    best_acc = train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, args.num_epochs)
+    best_acc = train_mlp(tr_emb, tr_lbl, vl_emb, vl_lbl, d_in, args.num_epochs, seed=args.seed)
 
     result = {
         "model": model_name, "mode": "headonly_ft",
+        "seed": args.seed,
         "val_acc": best_acc, "d_in": d_in,
         "train_steps": int(len(tr_lbl)), "val_steps": int(len(vl_lbl)),
         "num_epochs": args.num_epochs,
     }
-    (out / "results.json").write_text(json.dumps(result, indent=2))
-    print(f"\n[done] {model_name} head-only val acc: {best_acc*100:.2f}%")
+    fname = f"results_s{args.seed}.json"
+    (out / fname).write_text(json.dumps(result, indent=2))
+    print(f"\n[done] {model_name} head-only  seed={args.seed}  val_acc={best_acc*100:.2f}%")
     print(json.dumps(result, indent=2))
 
 
