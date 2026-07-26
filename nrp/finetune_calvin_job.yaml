@@ -34,9 +34,12 @@ data:
     #!/bin/bash
     set -euo pipefail
 
+    echo "=== Installing system packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget unzip
+
     echo "=== Installing dependencies ==="
     /opt/conda/bin/pip install --quiet \
-        "jax[cuda12_pip]==0.4.25" \
+        "jax==0.4.25" "jaxlib==0.4.25+cuda12.cudnn89" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
     /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
     /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
@@ -45,9 +48,6 @@ data:
     /opt/conda/bin/pip install --quiet "git+https://github.com/kvablack/dlimp.git"
     /opt/conda/bin/pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
     /opt/conda/bin/pip install --quiet google-cloud-storage
-
-    echo "=== Installing git + wget ==="
-    apt-get update -qq && apt-get install -y -qq git wget
 
     echo "=== Cloning TERM repo ==="
     git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
