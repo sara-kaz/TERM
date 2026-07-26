@@ -35,13 +35,16 @@ data:
     set -euo pipefail
 
     echo "=== Installing dependencies ==="
-    pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
-    pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
-    pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
+    /opt/conda/bin/pip install --quiet \
+        "jax[cuda12_pip]==0.4.25" \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
+    /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+    /opt/conda/bin/pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
         "transformers>=4.35.0,<4.41.0" sentencepiece
-    pip install --quiet "git+https://github.com/kvablack/dlimp.git"
-    pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
-    pip install --quiet google-cloud-storage
+    /opt/conda/bin/pip install --quiet "git+https://github.com/kvablack/dlimp.git"
+    /opt/conda/bin/pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+    /opt/conda/bin/pip install --quiet google-cloud-storage
 
     echo "=== Installing git + wget ==="
     apt-get update -qq && apt-get install -y -qq git wget
@@ -127,7 +130,7 @@ spec:
       restartPolicy: Never
       containers:
       - name: train
-        image: nvcr.io/nvidia/jax:24.04-py3
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
         command: ["/bin/bash", "/scripts/run.sh"]
         env:
         - name: XLA_PYTHON_CLIENT_PREALLOCATE
