@@ -118,23 +118,46 @@ def make_batch_from_refs(episodes: list, batch_refs: list):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--data_path",  required=True,  help="Path to language_table_episodes.pkl")
-    p.add_argument("--output_dir", required=True,  help="Directory for checkpoints and results")
-    p.add_argument("--seed",       type=int, default=42)
-    p.add_argument("--epochs",     type=int, default=80)
-    p.add_argument("--batch_size", type=int, default=32)
-    p.add_argument("--lr",         type=float, default=1e-4)
-    p.add_argument("--val_frac",   type=float, default=0.1)
-    p.add_argument("--patience",   type=int, default=25,   help="Early stopping patience")
-    p.add_argument("--num_actions",type=int, default=8)
-    p.add_argument("--octo_ckpt",  default="hf://rail-berkeley/octo-small")
+    p.add_argument("--data_path",   required=True,  help="Path to language_table_episodes.pkl")
+    p.add_argument("--output_dir",  required=True,  help="Directory for checkpoints and results")
+    p.add_argument("--resume_from", default=None,   help="Resume from this checkpoint dir (contains state.json)")
+    p.add_argument("--seed",        type=int, default=42)
+    p.add_argument("--epochs",      type=int, default=80)
+    p.add_argument("--batch_size",  type=int, default=32)
+    p.add_argument("--lr",          type=float, default=1e-4)
+    p.add_argument("--val_frac",    type=float, default=0.1)
+    p.add_argument("--patience",    type=int, default=25)
+    p.add_argument("--num_actions", type=int, default=8)
+    p.add_argument("--octo_ckpt",   default="hf://rail-berkeley/octo-small")
     return p.parse_args()
+
+
+def _save_checkpoint(ckpt_dir: Path, head_params, opt_state, state: dict):
+    """Save head params, optimizer state, and training state to ckpt_dir."""
+    import flax.serialization as serialization
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    (ckpt_dir / "head.msgpack").write_bytes(serialization.to_bytes(head_params))
+    with open(ckpt_dir / "opt_state.pkl", "wb") as f:
+        pickle.dump(opt_state, f)
+    (ckpt_dir / "state.json").write_text(json.dumps(state, indent=2))
+
+
+def _load_checkpoint(ckpt_dir: Path, head_params_template, opt_state_template):
+    """Load and return (head_params, opt_state, state_dict) from ckpt_dir."""
+    import flax.serialization as serialization
+    state = json.loads((ckpt_dir / "state.json").read_text())
+    head_bytes = (ckpt_dir / "head.msgpack").read_bytes()
+    head_params = serialization.from_bytes(head_params_template, head_bytes)
+    with open(ckpt_dir / "opt_state.pkl", "rb") as f:
+        opt_state = pickle.load(f)
+    return head_params, opt_state, state
 
 
 def main():
     args = parse_args()
     out  = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = out / "checkpoint"
 
     # ── Reproducibility ───────────────────────────────────────────────────────
     np.random.seed(args.seed)
@@ -162,24 +185,43 @@ def main():
     # ── Build classification head ─────────────────────────────────────────────
     head = DiscreteActionHead(num_actions=args.num_actions)
 
-    # Dummy forward to get feature dim and initialise head params
     dummy_frames  = np.zeros((1, NUM_FRAMES, IMG_SIZE, IMG_SIZE, 3), dtype=np.float32)
     dummy_instrs  = ["push the star near the moon"]
-    # Octo expects (batch, timestep, H, W, C) — keep the time dim with [-1:]
     obs_batch = {"image_primary": dummy_frames[:, -1:]}
     task_batch = octo_model.create_tasks(texts=dummy_instrs)
     pad_mask   = jnp.ones((1, 1), dtype=bool)
     dummy_out  = octo_model.run_transformer(obs_batch, task_batch, pad_mask, train=False)
-    # run_transformer returns the transformer output dict directly (no 'transformer_outputs' wrapper)
-    dummy_feat = dummy_out["readout_action"].tokens[:, 0]   # TokenGroup.tokens is (B, seq, D)
+    dummy_feat = dummy_out["readout_action"].tokens[:, 0]
 
     key, init_key = jax.random.split(key)
     head_vars = head.init(init_key, dummy_feat, training=False)
     print(f"[head] Classification head initialised. Feature dim: {dummy_feat.shape[-1]}")
 
-    # ── Optimiser (head-only) ─────────────────────────────────────────────────
+    # ── Optimiser ─────────────────────────────────────────────────────────────
     tx = optax.adamw(learning_rate=args.lr, weight_decay=1e-4)
     opt_state = tx.init(head_vars["params"])
+
+    # ── Resume from checkpoint if requested ───────────────────────────────────
+    start_epoch  = 1
+    best_val_acc = 0.0
+    patience_ctr = 0
+    results      = {"train_acc": [], "val_acc": [], "seed": args.seed}
+    head_params  = head_vars["params"]
+
+    resume_path = Path(args.resume_from) if args.resume_from else (
+        ckpt_dir if (ckpt_dir / "state.json").exists() else None
+    )
+    if resume_path and (resume_path / "state.json").exists():
+        print(f"[resume] Loading checkpoint from {resume_path}")
+        head_params, opt_state, saved = _load_checkpoint(resume_path, head_params, opt_state)
+        start_epoch  = saved["epoch"] + 1
+        best_val_acc = saved["best_val_acc"]
+        patience_ctr = saved["patience_ctr"]
+        results      = saved.get("results", results)
+        print(f"[resume] Continuing from epoch {start_epoch}  "
+              f"best_val_acc={best_val_acc*100:.2f}%  patience={patience_ctr}")
+    else:
+        print("[train] No checkpoint found — starting fresh.")
 
     # ── Training step (jit-compiled) ──────────────────────────────────────────
     @jax.jit
@@ -199,7 +241,6 @@ def main():
 
     # ── Helper: extract Octo features for a batch ─────────────────────────────
     def extract_features(frames, instrs):
-        # Keep time dim: (B, 1, H, W, C) — Octo requires (batch, timestep, H, W, C)
         obs      = {"image_primary": frames[:, -1:]}
         tasks    = octo_model.create_tasks(texts=instrs)
         pad_mask = jnp.ones((frames.shape[0], 1), dtype=bool)
@@ -209,13 +250,8 @@ def main():
         return np.array(out["readout_action"].tokens[:, 0])
 
     # ── Training loop ─────────────────────────────────────────────────────────
-    best_val_acc = 0.0
-    patience_ctr = 0
-    results = {"train_acc": [], "val_acc": [], "seed": args.seed}
-    head_params = head_vars["params"]
-
-    print(f"\n[train] Starting: {args.epochs} epochs, batch {args.batch_size}, lr {args.lr}")
-    for epoch in range(1, args.epochs + 1):
+    print(f"\n[train] Epochs {start_epoch}→{args.epochs}, batch {args.batch_size}, lr {args.lr}")
+    for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
 
         # ── Train ─────────────────────────────────────────────────────────────
@@ -255,13 +291,20 @@ def main():
               f"trn_acc={trn_acc:.4f}  val_acc={val_acc:.4f}  "
               f"loss={np.mean(trn_losses):.4f}  [{elapsed:.1f}s]")
 
-        # ── Early stopping + checkpoint ────────────────────────────────────────
+        # ── Checkpoint every epoch (enables resume) ────────────────────────────
+        _save_checkpoint(ckpt_dir, head_params, opt_state, {
+            "epoch":        epoch,
+            "best_val_acc": float(best_val_acc),
+            "patience_ctr": patience_ctr,
+            "results":      results,
+        })
+
+        # ── Best model + early stopping ────────────────────────────────────────
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             patience_ctr = 0
             import flax.serialization as serialization
-            ckpt_bytes = serialization.to_bytes(head_params)
-            (out / "best_head.msgpack").write_bytes(ckpt_bytes)
+            (out / "best_head.msgpack").write_bytes(serialization.to_bytes(head_params))
         else:
             patience_ctr += 1
             if patience_ctr >= args.patience:
@@ -272,7 +315,7 @@ def main():
     results["best_val_acc"] = float(best_val_acc)
     (out / "results.json").write_text(json.dumps(results, indent=2))
     print(f"\n[done] Seed {args.seed} | Best val acc: {best_val_acc*100:.2f}%")
-    print(f"[done] Results saved to {out}/results.json")
+    print(f"[done] Results → {out}/results.json  |  Checkpoint → {ckpt_dir}/")
 
 
 if __name__ == "__main__":

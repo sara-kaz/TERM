@@ -202,6 +202,8 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--data_path",   required=True)
     p.add_argument("--output_dir",  required=True)
+    p.add_argument("--resume_from", default=None,
+                   help="Resume from this checkpoint dir (contains training_state.json)")
     p.add_argument("--seed",        type=int,   default=42)
     p.add_argument("--epochs",      type=int,   default=80)
     p.add_argument("--batch_size",  type=int,   default=8,   help="Per-GPU batch size")
@@ -213,6 +215,15 @@ def parse_args():
     p.add_argument("--model_id",    default="openvla/openvla-7b")
     p.add_argument("--local_rank",  type=int,   default=-1)
     return p.parse_args()
+
+
+def _save_checkpoint(ckpt_dir: Path, model, optimizer, scheduler, state: dict):
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    save_model = model.module if hasattr(model, "module") else model
+    save_model.save_pretrained(ckpt_dir / "lora_adapter")
+    torch.save(optimizer.state_dict(),  ckpt_dir / "optimizer.pt")
+    torch.save(scheduler.state_dict(),  ckpt_dir / "scheduler.pt")
+    (ckpt_dir / "training_state.json").write_text(json.dumps(state, indent=2))
 
 
 def main():
@@ -232,6 +243,7 @@ def main():
 
     is_main = (rank == 0)
     out = Path(args.output_dir)
+    ckpt_dir = out / "checkpoint"
     if is_main:
         out.mkdir(parents=True, exist_ok=True)
 
@@ -250,15 +262,22 @@ def main():
     if is_main:
         print(f"[data] {len(trn_ep)} train / {len(val_ep)} val episodes")
 
+    # ── Detect resume checkpoint ──────────────────────────────────────────────
+    resume_path = Path(args.resume_from) if args.resume_from else (
+        ckpt_dir if (ckpt_dir / "training_state.json").exists() else None
+    )
+    resuming = resume_path is not None and (resume_path / "training_state.json").exists()
+    if is_main:
+        if resuming:
+            print(f"[resume] Found checkpoint at {resume_path}")
+        else:
+            print("[train] No checkpoint found — starting fresh.")
+
     # ── Load processor + model ────────────────────────────────────────────────
     if is_main:
         print(f"[model] Loading {args.model_id} …")
     processor = AutoProcessor.from_pretrained(args.model_id, trust_remote_code=True)
 
-    # 4-bit QLoRA: backbone stored in NF4, compute in bfloat16.
-    # GPU footprint: ~4 GB vs ~15 GB for bfloat16 full precision.
-    # This lets the job run on any NRP GPU (V100 16 GB, A40, A100, etc.)
-    # without requesting a specific node type.
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -268,29 +287,33 @@ def main():
     model = AutoModelForVision2Seq.from_pretrained(
         args.model_id,
         quantization_config=bnb_config,
-        device_map={"": 0},  # force all layers onto GPU 0; "auto" triggers dispatch_model .to() which crashes on 4-bit models
+        device_map={"": 0},
         trust_remote_code=True,
     )
-
-    # Prepares the frozen 4-bit backbone for gradient flow through LoRA adapters:
-    # casts LayerNorm to float32 and enables gradient checkpointing.
     model = prepare_model_for_kbit_training(
         model,
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
-    # ── Apply LoRA ────────────────────────────────────────────────────────────
-    lora_cfg = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=0.05,
-        target_modules=["q_proj", "v_proj"],   # LLaMA-2 attention projections
-        bias="none",
-    )
-    model = get_peft_model(model, lora_cfg)
-    # device_map placed model on GPU; prepare_model_for_kbit_training enables
-    # grad checkpointing — no .to(device) and no GradScaler needed.
+    # ── Apply LoRA (fresh) or reload saved adapter (resume) ───────────────────
+    if resuming:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(
+            model, str(resume_path / "lora_adapter"), is_trainable=True
+        )
+        if is_main:
+            print(f"[resume] LoRA adapter loaded from {resume_path / 'lora_adapter'}")
+    else:
+        lora_cfg = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=0.05,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+        )
+        model = get_peft_model(model, lora_cfg)
+
     if is_main:
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total     = sum(p.numel() for p in model.parameters())
@@ -325,15 +348,29 @@ def main():
     scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=total_steps, eta_min=1e-6)
 
-    # ── Training loop ─────────────────────────────────────────────────────────
+    # ── Resume training state ─────────────────────────────────────────────────
+    start_epoch  = 1
     best_val_acc = 0.0
     patience_ctr = 0
-    results = {"train_acc": [], "val_acc": [], "seed": args.seed}
+    results      = {"train_acc": [], "val_acc": [], "seed": args.seed}
+
+    if resuming and is_main:
+        saved = json.loads((resume_path / "training_state.json").read_text())
+        start_epoch  = saved["epoch"] + 1
+        best_val_acc = saved["best_val_acc"]
+        patience_ctr = saved["patience_ctr"]
+        results      = saved.get("results", results)
+        optimizer.load_state_dict(
+            torch.load(resume_path / "optimizer.pt", map_location=device))
+        scheduler.load_state_dict(
+            torch.load(resume_path / "scheduler.pt", map_location=device))
+        print(f"[resume] Continuing from epoch {start_epoch}  "
+              f"best_val_acc={best_val_acc*100:.2f}%  patience={patience_ctr}")
 
     if is_main:
-        print(f"\n[train] {args.epochs} epochs | bs={args.batch_size} | lr={args.lr}")
+        print(f"\n[train] Epochs {start_epoch}→{args.epochs} | bs={args.batch_size} | lr={args.lr}")
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
         if ddp:
             trn_sampler.set_epoch(epoch)
@@ -376,7 +413,16 @@ def main():
                   f"val_acc={val_acc:.4f}  loss={trn_loss_sum/len(trn_loader):.4f}  "
                   f"[{elapsed:.1f}s]")
 
-        # ── Checkpoint + early stopping ────────────────────────────────────────
+        # ── Per-epoch checkpoint (enables resume across pod restarts) ─────────
+        if is_main:
+            _save_checkpoint(ckpt_dir, model, optimizer, scheduler, {
+                "epoch":        epoch,
+                "best_val_acc": float(best_val_acc),
+                "patience_ctr": patience_ctr,
+                "results":      results,
+            })
+
+        # ── Best model + early stopping ────────────────────────────────────────
         if is_main and val_acc > best_val_acc:
             best_val_acc = val_acc
             patience_ctr = 0
