@@ -1,9 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# NRP Kubernetes Jobs: 1-epoch LoRA fine-tuning (seed 42)
+# NRP Kubernetes Jobs: end-to-end fine-tuning baselines (seed 42)
 # Namespace: csun-ehuang-era
 #
-# Octo:    head-only (frozen backbone + Flax classification head), ~30-60 min
-# OpenVLA: LoRA fine-tune (q_proj/v_proj, r=16), 4-bit QLoRA, ~2-4 hr
+# Octo:    full backbone fine-tune (backbone lr=1e-5, head lr=1e-4), ~2-4 hr
+# OpenVLA: LoRA fine-tune (q_proj/v_proj, r=16), 4-bit QLoRA, ~4-8 hr
 #
 # Deploy:
 #   kubectl apply -f nrp/finetune_job.yaml -n csun-ehuang-era
@@ -12,7 +12,7 @@
 #   kubectl get pods -n csun-ehuang-era -l app=finetune
 #   kubectl logs -f <pod-name> -n csun-ehuang-era
 #
-# Retrieve:
+# Retrieve results (if GCS upload failed):
 #   kubectl cp <octo-pod>:/results/results.json    ./octo_ft_s42.json   -n csun-ehuang-era
 #   kubectl cp <openvla-pod>:/results/results.json ./openvla_ft_s42.json -n csun-ehuang-era
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,35 +54,11 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    # ── Resume checkpoint from GCS if available (Python API, no gsutil needed) ─
-    GCS_BUCKET="sara-kaz-term"
-    GCS_PREFIX="checkpoints/octo_lt_s42"
-    RESUME_FLAG=""
-    python3 - <<'PYEOF'
-import sys, os
-from google.cloud import storage
-bucket_name = os.environ["GCS_BUCKET"]
-prefix      = os.environ["GCS_PREFIX"]
-dest        = "/results/checkpoint"
-client = storage.Client()
-bucket = client.bucket(bucket_name)
-blobs  = list(bucket.list_blobs(prefix=prefix + "/state.json"))
-if not blobs:
-    print("[gcs] No checkpoint found — starting fresh.")
-    sys.exit(1)
-print("[gcs] Checkpoint found — downloading...")
-os.makedirs(dest, exist_ok=True)
-for blob in bucket.list_blobs(prefix=prefix + "/"):
-    rel        = blob.name[len(prefix)+1:]
-    local_path = os.path.join(dest, rel)
-    os.makedirs(os.path.dirname(local_path) or dest, exist_ok=True)
-    blob.download_to_filename(local_path)
-    print(f"  {rel}")
-sys.exit(0)
-PYEOF
-    if [ $? -eq 0 ]; then
-      RESUME_FLAG="--resume_from /results/checkpoint"
-    fi
+    echo "=== Checking GCS for resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
 
     echo "=== Running Octo end-to-end fine-tuning (seed 42, up to 20 epochs) ==="
     cd /workspace/TERM
@@ -98,23 +74,9 @@ PYEOF
         ${RESUME_FLAG}
 
     echo "=== Uploading checkpoint to GCS ==="
-    python3 - <<'PYEOF'
-import os
-from google.cloud import storage
-bucket_name = os.environ["GCS_BUCKET"]
-prefix      = os.environ["GCS_PREFIX"]
-src         = "/results/checkpoint"
-client = storage.Client()
-bucket = client.bucket(bucket_name)
-for root, dirs, files in os.walk(src):
-    for fname in files:
-        local_path = os.path.join(root, fname)
-        rel        = os.path.relpath(local_path, src)
-        blob_name  = f"{prefix}/{rel}"
-        bucket.blob(blob_name).upload_from_filename(local_path)
-        print(f"  Uploaded: {rel}")
-print("[gcs] Checkpoint uploaded.")
-PYEOF
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint
 
     echo "=== Result ==="
     cat /results/results.json
@@ -210,7 +172,7 @@ data:
         bitsandbytes peft \
         "timm>=0.9.10,<1.0.0" \
         tensorflow-cpu tensorflow-datasets \
-        pillow numpy pyyaml
+        pillow numpy pyyaml google-cloud-storage
 
     echo "=== Installing git ==="
     apt-get update -qq && apt-get install -y -qq git
@@ -229,34 +191,11 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    # ── Resume checkpoint from GCS if available (Python API, no gsutil needed) ─
-    RESUME_FLAG=""
-    /opt/conda/bin/pip install --quiet google-cloud-storage
-    python3 - <<'PYEOF'
-import sys, os
-from google.cloud import storage
-bucket_name = os.environ["GCS_BUCKET"]
-prefix      = os.environ["GCS_PREFIX"]
-dest        = "/results/checkpoint"
-client = storage.Client()
-bucket = client.bucket(bucket_name)
-blobs  = list(bucket.list_blobs(prefix=prefix + "/training_state.json"))
-if not blobs:
-    print("[gcs] No checkpoint found — starting fresh.")
-    sys.exit(1)
-print("[gcs] Checkpoint found — downloading...")
-os.makedirs(dest, exist_ok=True)
-for blob in bucket.list_blobs(prefix=prefix + "/"):
-    rel        = blob.name[len(prefix)+1:]
-    local_path = os.path.join(dest, rel)
-    os.makedirs(os.path.dirname(local_path) or dest, exist_ok=True)
-    blob.download_to_filename(local_path)
-    print(f"  {rel}")
-sys.exit(0)
-PYEOF
-    if [ $? -eq 0 ]; then
-      RESUME_FLAG="--resume_from /results/checkpoint"
-    fi
+    echo "=== Checking GCS for resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key training_state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
 
     echo "=== Running OpenVLA LoRA fine-tuning (seed 42, 5 epochs this run) ==="
     cd /workspace/TERM
@@ -272,23 +211,9 @@ PYEOF
         ${RESUME_FLAG}
 
     echo "=== Uploading checkpoint to GCS ==="
-    python3 - <<'PYEOF'
-import os
-from google.cloud import storage
-bucket_name = os.environ["GCS_BUCKET"]
-prefix      = os.environ["GCS_PREFIX"]
-src         = "/results/checkpoint"
-client = storage.Client()
-bucket = client.bucket(bucket_name)
-for root, dirs, files in os.walk(src):
-    for fname in files:
-        local_path = os.path.join(root, fname)
-        rel        = os.path.relpath(local_path, src)
-        blob_name  = f"{prefix}/{rel}"
-        bucket.blob(blob_name).upload_from_filename(local_path)
-        print(f"  Uploaded: {rel}")
-print("[gcs] Checkpoint uploaded.")
-PYEOF
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint
 
     echo "=== Result ==="
     cat /results/results.json
