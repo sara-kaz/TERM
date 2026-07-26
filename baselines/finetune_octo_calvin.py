@@ -186,9 +186,11 @@ def main():
     val_refs = build_window_refs(val_ep, seed=0)
     print(f"[data] {len(trn_refs)} train / {len(val_refs)} val windows")
 
+    jax.config.update("jax_disable_jit", True)
     print(f"[octo] Loading {args.octo_ckpt} …")
     octo_model = OctoModel.load_pretrained(args.octo_ckpt)
     print("[octo] Backbone loaded.")
+    jax.config.update("jax_disable_jit", False)
 
     all_ep = trn_ep + val_ep
     task_cache = build_task_cache(octo_model, all_ep)

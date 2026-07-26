@@ -200,9 +200,16 @@ def main():
     print(f"[data] {len(trn_refs)} train / {len(val_refs)} val windows")
 
     # ── Load Octo ─────────────────────────────────────────────────────────────
+    # Disable JIT during load_pretrained: Octo internally re-traces the model
+    # for every observation configuration it was pretrained on, which causes
+    # hours of XLA compilation on slow GPUs. Running eagerly skips this.
+    jax.config.update("jax_disable_jit", True)
     print(f"[octo] Loading {args.octo_ckpt} …")
     octo_model = OctoModel.load_pretrained(args.octo_ckpt)
     print("[octo] Backbone loaded.")
+    # Re-enable JIT — first real compilation happens at the dummy run below
+    # with the correct task shapes from the cache, so it compiles exactly once.
+    jax.config.update("jax_disable_jit", False)
 
     # Pre-compute all task embeddings with a fixed anchor text so every chunk
     # produces the same token padding length → backbone compiles exactly once.
