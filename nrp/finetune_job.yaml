@@ -229,15 +229,33 @@ data:
       rm -rf /data/lt_raw
     fi
 
-    # ── Resume checkpoint from GCS if available ──────────────────────────────
-    GCS_CKPT="gs://sara-kaz-term/checkpoints/openvla_lt_s42"
-    if gsutil -q stat "${GCS_CKPT}/training_state.json" 2>/dev/null; then
-      echo "=== Resuming OpenVLA from GCS checkpoint ==="
-      mkdir -p /results/checkpoint
-      gsutil -m cp -r "${GCS_CKPT}/" /results/checkpoint/
+    # ── Resume checkpoint from GCS if available (Python API, no gsutil needed) ─
+    RESUME_FLAG=""
+    /opt/conda/bin/pip install --quiet google-cloud-storage
+    python3 - <<'PYEOF'
+import sys, os
+from google.cloud import storage
+bucket_name = os.environ["GCS_BUCKET"]
+prefix      = os.environ["GCS_PREFIX"]
+dest        = "/results/checkpoint"
+client = storage.Client()
+bucket = client.bucket(bucket_name)
+blobs  = list(bucket.list_blobs(prefix=prefix + "/training_state.json"))
+if not blobs:
+    print("[gcs] No checkpoint found — starting fresh.")
+    sys.exit(1)
+print("[gcs] Checkpoint found — downloading...")
+os.makedirs(dest, exist_ok=True)
+for blob in bucket.list_blobs(prefix=prefix + "/"):
+    rel        = blob.name[len(prefix)+1:]
+    local_path = os.path.join(dest, rel)
+    os.makedirs(os.path.dirname(local_path) or dest, exist_ok=True)
+    blob.download_to_filename(local_path)
+    print(f"  {rel}")
+sys.exit(0)
+PYEOF
+    if [ $? -eq 0 ]; then
       RESUME_FLAG="--resume_from /results/checkpoint"
-    else
-      RESUME_FLAG=""
     fi
 
     echo "=== Running OpenVLA LoRA fine-tuning (seed 42, 5 epochs this run) ==="
@@ -254,7 +272,23 @@ data:
         ${RESUME_FLAG}
 
     echo "=== Uploading checkpoint to GCS ==="
-    gsutil -m cp -r /results/checkpoint/ "${GCS_CKPT}/"
+    python3 - <<'PYEOF'
+import os
+from google.cloud import storage
+bucket_name = os.environ["GCS_BUCKET"]
+prefix      = os.environ["GCS_PREFIX"]
+src         = "/results/checkpoint"
+client = storage.Client()
+bucket = client.bucket(bucket_name)
+for root, dirs, files in os.walk(src):
+    for fname in files:
+        local_path = os.path.join(root, fname)
+        rel        = os.path.relpath(local_path, src)
+        blob_name  = f"{prefix}/{rel}"
+        bucket.blob(blob_name).upload_from_filename(local_path)
+        print(f"  Uploaded: {rel}")
+print("[gcs] Checkpoint uploaded.")
+PYEOF
 
     echo "=== Result ==="
     cat /results/results.json
@@ -290,6 +324,10 @@ spec:
           value: "false"
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/openvla_lt_s42"
         resources:
           requests:
             cpu: "4"
