@@ -603,6 +603,9 @@ data:
         --state_key state.json --dest /results/checkpoint \
       && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
 
+    # ── HF token (paste your token from huggingface.co/settings/tokens) ──────
+    export HF_TOKEN="PASTE_YOUR_HF_TOKEN_HERE"
+
     echo "=== Running π₀ (PaliGemma-3B LoRA) fine-tuning (seed 42, 10 epochs) ==="
     cd /workspace/TERM
     python -m baselines.finetune_pi0_lt \
@@ -649,11 +652,6 @@ spec:
         image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
         command: ["/bin/bash", "/scripts/run.sh"]
         env:
-        - name: HF_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: hf-token
-              key: token
         - name: HF_HOME
           value: "/hf_cache"
         - name: TRANSFORMERS_CACHE
