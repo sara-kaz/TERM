@@ -603,7 +603,7 @@ data:
         --state_key state.json --dest /results/checkpoint \
       && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
 
-    # ── HF token (paste your token from huggingface.co/settings/tokens) ──────
+    # ── HF token: injected at deploy time via sed, never stored in git ─────────
     export HF_TOKEN="PASTE_YOUR_HF_TOKEN_HERE"
 
     echo "=== Running π₀ (PaliGemma-3B LoRA) fine-tuning (seed 42, 10 epochs) ==="
