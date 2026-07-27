@@ -1,0 +1,223 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Jobs: Language-Table official 5-task rollout evaluation
+# Namespace: csun-ehuang-era
+#
+# Runs both seeds in parallel (~1-2 hr each).
+# Checkpoints downloaded from GCS public objects — no secret required.
+# Results printed to pod logs; retrieve with:
+#   kubectl logs -f vera-lt-eval-s42-<hash>  -n csun-ehuang-era
+#   kubectl logs -f vera-lt-eval-s123-<hash> -n csun-ehuang-era
+#
+# Deploy:
+#   kubectl apply -f nrp/eval_lt_rollout_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=vera-lt-eval
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Seed 42 eval ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vera-lt-eval-s42-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    SEED=42
+    CKPT_URL="https://storage.googleapis.com/sara-kaz-term/checkpoints/vera_lt_s42.pt"
+    CKPT="/workspace/vera_lt_s42.pt"
+
+    echo "=== System packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget
+
+    echo "=== Python deps ==="
+    pip install --quiet pybullet dm-env numpy pillow
+    pip install --quiet "git+https://github.com/openai/CLIP.git"
+
+    echo "=== Cloning TERM repo + language-table ==="
+    git clone --quiet https://github.com/sara-kaz/TERM.git /workspace/TERM
+    git clone --quiet https://github.com/google-research/language-table.git \
+        /workspace/TERM/vendor/language-table
+    pip install --quiet -e /workspace/TERM/vendor/language-table
+
+    echo "=== Downloading checkpoint ==="
+    wget -q -O "${CKPT}" "${CKPT_URL}"
+    echo "Checkpoint size: $(du -sh ${CKPT} | cut -f1)"
+
+    echo "=== Running Language-Table rollout eval (seed ${SEED}, 50 ep × 5 tasks) ==="
+    cd /workspace/TERM
+    export PYTHONPATH="/workspace/TERM:/workspace/TERM/vendor/language-table:${PYTHONPATH:-}"
+
+    python scripts/run_language_table_rollout_eval.py \
+        --checkpoint        "${CKPT}" \
+        --language_table_root /workspace/TERM/vendor/language-table \
+        --num_episodes      50 \
+        --eval_seed         "${SEED}" \
+        --max_episode_steps 200 \
+        --action_mode       hybrid \
+        --action_magnitude  0.05 \
+        --action_hold_steps 4 \
+        --crop_factor       0.95 \
+        --eval_log_dir      /results/seed${SEED}
+
+    echo "=== Results ==="
+    cat /results/seed${SEED}/vera_language_table_summary.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vera-lt-eval-s42
+  namespace: csun-ehuang-era
+  labels:
+    app: vera-lt-eval
+    seed: "42"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: vera-lt-eval
+        seed: "42"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: eval
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: results-vol
+          mountPath: /results
+      volumes:
+      - name: scripts
+        configMap:
+          name: vera-lt-eval-s42-scripts
+          defaultMode: 0755
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "1Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ── Seed 123 eval ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vera-lt-eval-s123-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    SEED=123
+    CKPT_URL="https://storage.googleapis.com/sara-kaz-term/checkpoints/vera_lt_s123.pt"
+    CKPT="/workspace/vera_lt_s123.pt"
+
+    echo "=== System packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget
+
+    echo "=== Python deps ==="
+    pip install --quiet pybullet dm-env numpy pillow
+    pip install --quiet "git+https://github.com/openai/CLIP.git"
+
+    echo "=== Cloning TERM repo + language-table ==="
+    git clone --quiet https://github.com/sara-kaz/TERM.git /workspace/TERM
+    git clone --quiet https://github.com/google-research/language-table.git \
+        /workspace/TERM/vendor/language-table
+    pip install --quiet -e /workspace/TERM/vendor/language-table
+
+    echo "=== Downloading checkpoint ==="
+    wget -q -O "${CKPT}" "${CKPT_URL}"
+    echo "Checkpoint size: $(du -sh ${CKPT} | cut -f1)"
+
+    echo "=== Running Language-Table rollout eval (seed ${SEED}, 50 ep × 5 tasks) ==="
+    cd /workspace/TERM
+    export PYTHONPATH="/workspace/TERM:/workspace/TERM/vendor/language-table:${PYTHONPATH:-}"
+
+    python scripts/run_language_table_rollout_eval.py \
+        --checkpoint        "${CKPT}" \
+        --language_table_root /workspace/TERM/vendor/language-table \
+        --num_episodes      50 \
+        --eval_seed         "${SEED}" \
+        --max_episode_steps 200 \
+        --action_mode       hybrid \
+        --action_magnitude  0.05 \
+        --action_hold_steps 4 \
+        --crop_factor       0.95 \
+        --eval_log_dir      /results/seed${SEED}
+
+    echo "=== Results ==="
+    cat /results/seed${SEED}/vera_language_table_summary.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vera-lt-eval-s123
+  namespace: csun-ehuang-era
+  labels:
+    app: vera-lt-eval
+    seed: "123"
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: vera-lt-eval
+        seed: "123"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: eval
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: results-vol
+          mountPath: /results
+      volumes:
+      - name: scripts
+        configMap:
+          name: vera-lt-eval-s123-scripts
+          defaultMode: 0755
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "1Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
