@@ -73,11 +73,11 @@ def _try_valid_reset(env, policy_seed: int, max_attempts: int = 20):
             except Exception:
                 pass
             env.seed(policy_seed + attempt + 1)
-    except ImportError:
+    except Exception:
         if not _ORACLE_WARNED:
             print(
-                "[lt_eval] tf_agents not installed — using plain env.reset() "
-                "(pip install tf_agents for oracle-valid inits)",
+                "[lt_eval] oracle unavailable (tf_agents/tfp import error) — "
+                "using plain env.reset()",
                 flush=True,
             )
             _ORACLE_WARNED = True
