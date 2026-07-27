@@ -77,7 +77,7 @@ data:
         --epochs     30 \
         --batch_size 32 \
         --num_actions 14 \
-        --patience   10
+        --patience   15
 
     echo "=== Result ==="
     cat /results/results.json
@@ -93,6 +93,7 @@ metadata:
     model: cnn-lstm
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 14400  # 4 hr hard cap — prevents ContainerStatusUnknown hangs
   template:
     metadata:
       labels:
@@ -110,11 +111,11 @@ spec:
         resources:
           requests:
             cpu: "4"
-            memory: "24Gi"
+            memory: "16Gi"
             nvidia.com/gpu: "1"
           limits:
             cpu: "4"
-            memory: "24Gi"
+            memory: "16Gi"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: scripts
@@ -209,6 +210,7 @@ metadata:
     model: numvla
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 21600  # 6 hr hard cap
   template:
     metadata:
       labels:
@@ -304,17 +306,17 @@ data:
           --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
     fi
 
-    echo "=== Running Octo on CALVIN (seed 42, 14 bins, 20 epochs) ==="
+    echo "=== Running Octo on CALVIN (seed 42, 14 bins, 30 epochs, patience 25) ==="
     cd /workspace/TERM
     python -m baselines.finetune_octo_calvin \
         --data_path   "${DATA_PKL}" \
         --output_dir  /results \
         --seed        42 \
-        --epochs      20 \
+        --epochs      30 \
         --batch_size  16 \
         --lr_backbone 1e-5 \
         --lr_head     1e-4 \
-        --patience    10
+        --patience    25
 
     echo "=== Result ==="
     cat /results/results.json
@@ -330,6 +332,7 @@ metadata:
     model: octo
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 28800  # 8 hr hard cap (JAX warm-start + 30 epochs)
   template:
     metadata:
       labels:
@@ -452,6 +455,7 @@ metadata:
     model: openvla
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 28800  # 8 hr hard cap
   template:
     metadata:
       labels:
