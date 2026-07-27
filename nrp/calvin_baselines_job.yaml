@@ -1,0 +1,510 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NRP Kubernetes Jobs: CALVIN D→D baselines for Table 1 CALVIN column
+# Namespace: csun-ehuang-era
+#
+# Runs 4 models in parallel (one pod each):
+#   cnn-lstm-calvin   — frozen CLIP + LSTM,  14 bins
+#   numvla-calvin     — TERM arch + numerical token, 14 bins
+#   octo-calvin       — full backbone fine-tune, 14 bins (JAX image)
+#   openvla-calvin    — LoRA fine-tune, 14 bins
+#
+# CNN-LSTM and NumericalVLA are fast (~1-2 hr); Octo/OpenVLA take ~3-6 hr.
+#
+# Deploy:
+#   kubectl apply -f nrp/calvin_baselines_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl get pods -n csun-ehuang-era -l app=calvin-baselines
+#
+# Retrieve results:
+#   kubectl logs -f <pod-name> -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Shared data-fetch helper script ─────────────────────────────────────────
+# Each pod independently fetches CALVIN data (no shared volume).
+# CNN-LSTM / NumericalVLA pods use the pytorch image (fast).
+# Octo pod uses the existing octo-calvin-ft job (already in finetune_calvin_job.yaml).
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. CNN-LSTM on CALVIN
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnn-lstm-calvin-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== System packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget unzip
+
+    echo "=== Python deps ==="
+    pip install --quiet torch torchvision numpy pillow "git+https://github.com/openai/CLIP.git" google-cloud-storage
+
+    echo "=== Cloning TERM repo ==="
+    git clone --quiet https://github.com/sara-kaz/TERM.git /workspace/TERM
+    cd /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN data ==="
+      GCS_OK=0
+      python3 scripts/gcs_sync.py download \
+          --bucket sara-kaz-term \
+          --prefix data/calvin_task_D_D \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS miss — downloading from CALVIN server (~88 GB) ==="
+        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      python3 scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
+    fi
+
+    echo "=== Running CNN-LSTM on CALVIN (seed 42, 14 bins) ==="
+    python -m baselines.finetune_cnn_lstm_lt \
+        --data_path  "${DATA_PKL}" \
+        --output_dir /results \
+        --seed       42 \
+        --epochs     30 \
+        --batch_size 32 \
+        --num_actions 14 \
+        --patience   10
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cnn-lstm-calvin
+  namespace: csun-ehuang-era
+  labels:
+    app: calvin-baselines
+    model: cnn-lstm
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: calvin-baselines
+        model: cnn-lstm
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+      volumes:
+      - name: scripts
+        configMap:
+          name: cnn-lstm-calvin-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "5Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. NumericalVLA on CALVIN
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: numvla-calvin-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== System packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget unzip
+
+    echo "=== Python deps ==="
+    pip install --quiet torch torchvision numpy pillow "git+https://github.com/openai/CLIP.git" google-cloud-storage
+
+    echo "=== Cloning TERM repo ==="
+    git clone --quiet https://github.com/sara-kaz/TERM.git /workspace/TERM
+    cd /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN data ==="
+      GCS_OK=0
+      python3 scripts/gcs_sync.py download \
+          --bucket sara-kaz-term \
+          --prefix data/calvin_task_D_D \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS miss — downloading from CALVIN server (~88 GB) ==="
+        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      python3 scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
+    fi
+
+    echo "=== Running NumericalVLA on CALVIN (seed 42, 14 bins, action_dim=7) ==="
+    python -m baselines.finetune_numvla_lt \
+        --data_path   "${DATA_PKL}" \
+        --output_dir  /results \
+        --seed        42 \
+        --epochs      80 \
+        --batch_size  32 \
+        --num_actions 14 \
+        --action_dim  7 \
+        --patience    25
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: numvla-calvin
+  namespace: csun-ehuang-era
+  labels:
+    app: calvin-baselines
+    model: numvla
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: calvin-baselines
+        model: numvla
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+      volumes:
+      - name: scripts
+        configMap:
+          name: numvla-calvin-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "5Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Octo on CALVIN  (already in finetune_calvin_job.yaml — re-expose here)
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: octo-calvin-scripts-v2
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    apt-get update -qq && apt-get install -y -qq git wget unzip
+    /opt/conda/bin/pip install --quiet "jax[cuda12]"
+    /opt/conda/bin/python -c "import jax,sys; d=jax.devices(); g=[x for x in d if x.platform=='gpu']; print('[jax-verify] jax='+jax.__version__+' gpu='+str(len(g)),flush=True); sys.exit('ERROR: No GPU. devices='+str(d)) if not g else 0"
+    /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
+    /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+    /opt/conda/bin/pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
+        "transformers>=4.35.0,<4.41.0" sentencepiece
+    /opt/conda/bin/pip install --quiet "git+https://github.com/kvablack/dlimp.git"
+    /opt/conda/bin/pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml google-cloud-storage
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN data ==="
+      GCS_OK=0
+      python3 /workspace/TERM/scripts/gcs_sync.py download \
+          --bucket sara-kaz-term \
+          --prefix data/calvin_task_D_D \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS miss — downloading from CALVIN server ==="
+        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
+    fi
+
+    echo "=== Running Octo on CALVIN (seed 42, 14 bins, 20 epochs) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_octo_calvin \
+        --data_path   "${DATA_PKL}" \
+        --output_dir  /results \
+        --seed        42 \
+        --epochs      20 \
+        --batch_size  16 \
+        --lr_backbone 1e-5 \
+        --lr_head     1e-4 \
+        --patience    10
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-calvin-v2
+  namespace: csun-ehuang-era
+  labels:
+    app: calvin-baselines
+    model: octo
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: calvin-baselines
+        model: octo
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-calvin-scripts-v2
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. OpenVLA on CALVIN
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openvla-calvin-scripts-v2
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing dependencies ==="
+    apt-get update -qq && apt-get install -y -qq git wget unzip
+    pip install --quiet \
+        "torch==2.3.0" "torchvision==0.18.0" \
+        "transformers>=4.41.0,<4.45.0" \
+        "accelerate>=0.29.0,<0.34.0" \
+        bitsandbytes peft \
+        "timm>=0.9.10,<1.0.0" \
+        pillow numpy pyyaml google-cloud-storage
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/calvin_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Fetching CALVIN data ==="
+      GCS_OK=0
+      python3 /workspace/TERM/scripts/gcs_sync.py download \
+          --bucket sara-kaz-term \
+          --prefix data/calvin_task_D_D \
+          --state_key "training/lang_annotations/auto_lang_ann.npy" \
+          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
+
+      if [ "${GCS_OK}" -eq 0 ]; then
+        echo "=== GCS miss — downloading from CALVIN server ==="
+        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+        unzip -q /data/task_D_D.zip -d /data/
+        rm -f /data/task_D_D.zip
+      fi
+
+      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
+          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
+    fi
+
+    echo "=== Running OpenVLA on CALVIN (seed 42, 14 bins, LoRA) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_openvla_calvin \
+        --data_path  "${DATA_PKL}" \
+        --output_dir /results \
+        --seed       42 \
+        --epochs     5 \
+        --batch_size 4 \
+        --lr         2e-4 \
+        --lora_r     16 \
+        --lora_alpha 32
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openvla-calvin-v2
+  namespace: csun-ehuang-era
+  labels:
+    app: calvin-baselines
+    model: openvla
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: calvin-baselines
+        model: openvla
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: HF_HOME
+          value: "/hf_cache"
+        - name: TRANSFORMERS_CACHE
+          value: "/hf_cache"
+        - name: TOKENIZERS_PARALLELISM
+          value: "false"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: hf-cache
+          mountPath: /hf_cache
+      volumes:
+      - name: scripts
+        configMap:
+          name: openvla-calvin-scripts-v2
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "250Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "10Gi"
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: "50Gi"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule

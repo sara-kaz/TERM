@@ -250,7 +250,7 @@ def build_refs(episodes: list, seed: int) -> list:
     return refs
 
 
-def make_batch(episodes, refs, num_actions, device):
+def make_batch(episodes, refs, num_actions, device, action_dim=2):
     frames_l, lang_l, acts_l = [], [], []
     act_hist_l, rew_hist_l, vec_hist_l = [], [], []
     prev_act_l, prev_rew_l = [], []
@@ -273,14 +273,15 @@ def make_batch(episodes, refs, num_actions, device):
                 ah.append(int(ep["actions"][t_h]))
                 r = float(ep.get("rewards", [0.0] * T_ep)[t_h]) if "rewards" in ep else 0.0
                 rh.append(r)
-                if "action_vecs" in ep:
-                    vh.append(np.array(ep["action_vecs"][t_h], dtype=np.float32))
+                vecs = ep.get("action_vecs", ep.get("action_vectors", None))
+                if vecs is not None:
+                    vh.append(np.array(vecs[t_h], dtype=np.float32)[:action_dim])
                 else:
-                    vh.append(np.zeros(2, dtype=np.float32))
+                    vh.append(np.zeros(action_dim, dtype=np.float32))
             else:
                 ah.append(num_actions)   # padding index
                 rh.append(0.0)
-                vh.append(np.zeros(2, dtype=np.float32))
+                vh.append(np.zeros(action_dim, dtype=np.float32))
 
         act_hist_l.append(ah)
         rew_hist_l.append(rh)
@@ -350,6 +351,8 @@ def parse_args():
     p.add_argument("--val_frac",    type=float, default=0.1)
     p.add_argument("--patience",    type=int,   default=25)
     p.add_argument("--num_actions", type=int,   default=8)
+    p.add_argument("--action_dim",  type=int,   default=2,
+                   help="Action vector dim: 2 for LT, 7 for CALVIN")
     p.add_argument("--closed_loop_dropout", type=float, default=0.35)
     return p.parse_args()
 
@@ -385,7 +388,8 @@ def main():
     val_refs = build_refs(val_ep, 0)
     print(f"[data] {len(trn_refs)} train / {len(val_refs)} val windows", flush=True)
 
-    model = NumericalVLAModel(num_actions=args.num_actions).to(device)
+    model = NumericalVLAModel(num_actions=args.num_actions,
+                             action_dim=args.action_dim).to(device)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[model] Trainable params: {n_train:,}", flush=True)
 
@@ -425,7 +429,7 @@ def main():
             for s in range(0, len(val_refs), args.batch_size):
                 batch = val_refs[s: s + args.batch_size]
                 fr, lt, ac, ah, rh, vh, pa, pr = make_batch(
-                    val_ep, batch, args.num_actions, device)
+                    val_ep, batch, args.num_actions, device, args.action_dim)
                 out_d = model(fr, lt, ah, rh, pa, pr, vh)
                 preds_all.extend(out_d["logits"].argmax(-1).cpu().tolist())
                 labels_all.extend(ac.cpu().tolist())
@@ -446,7 +450,7 @@ def main():
             if len(batch) < 2:
                 continue
             fr, lt, ac, ah, rh, vh, pa, pr = make_batch(
-                trn_ep, batch, args.num_actions, device)
+                trn_ep, batch, args.num_actions, device, args.action_dim)
 
             # Closed-loop dropout: zero out history fraction of time
             if random.random() < args.closed_loop_dropout:
