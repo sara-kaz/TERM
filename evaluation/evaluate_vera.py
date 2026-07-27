@@ -83,6 +83,16 @@ def load_checkpoint(model: VERAModel, checkpoint_path: str, device: str):
                 new_k = new + k[len(old):]
                 break
         remapped[new_k] = v
+    # Size-mismatch fix: checkpoint action head may have been chunked (num_actions*chunk_size
+    # outputs) while current model expects num_actions outputs — truncate to first slice.
+    model_sd = model.state_dict()
+    for k in list(remapped.keys()):
+        if k in model_sd and remapped[k].shape != model_sd[k].shape:
+            ck, mk = remapped[k].shape, model_sd[k].shape
+            if len(ck) == len(mk) and all(ck[i] >= mk[i] for i in range(len(mk))):
+                slices = tuple(slice(0, s) for s in mk)
+                remapped[k] = remapped[k][slices].contiguous()
+                print(f"[load_checkpoint] truncated {k}: {tuple(ck)} → {tuple(mk)}", flush=True)
     missing, unexpected = model.load_state_dict(remapped, strict=False)
     if missing:
         print(f"[load_checkpoint] missing keys ({len(missing)}): {missing[:6]}{'…' if len(missing) > 6 else ''}", flush=True)
