@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CPU-only pod: download CALVIN task_D_D, pack → pkl, upload to GCS.
+# No GPU requested → no GPU preemption policy applies.
+#
+# Run this FIRST. Once it completes, deploy calvin_baselines_job.yaml.
+#
+# Deploy:
+#   kubectl apply -f nrp/calvin_data_prep_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl logs -f calvin-data-prep-<hash> -n csun-ehuang-era
+#
+# Verify pkl landed in GCS (run from your machine after job completes):
+#   gsutil ls -l gs://sara-kaz-term/data/calvin_episodes.pkl
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: calvin-data-prep-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== [$(date)] Installing packages ==="
+    apt-get update -qq && apt-get install -y -qq wget unzip git python3 python3-pip curl gnupg
+
+    echo "=== [$(date)] Installing gsutil ==="
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+        | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    apt-get update -qq && apt-get install -y -qq google-cloud-cli
+    export GOOGLE_APPLICATION_CREDENTIALS=/gcs-key/key.json
+
+    echo "=== [$(date)] Installing Python deps ==="
+    pip3 install --quiet numpy
+
+    echo "=== [$(date)] Cloning TERM repo ==="
+    git clone --quiet https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    # ── Check if pkl already in GCS ──────────────────────────────────────────
+    if gsutil -q stat gs://sara-kaz-term/data/calvin_episodes.pkl 2>/dev/null; then
+      echo "=== [$(date)] calvin_episodes.pkl already in GCS — nothing to do ==="
+      gsutil ls -l gs://sara-kaz-term/data/calvin_episodes.pkl
+      exit 0
+    fi
+
+    # ── Download CALVIN task_D_D zip (~88 GB) ────────────────────────────────
+    echo "=== [$(date)] Downloading CALVIN task_D_D (~88 GB) ==="
+    mkdir -p /data
+    wget -q --show-progress -O /data/task_D_D.zip \
+        "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
+    echo "=== [$(date)] Download complete. Size: $(du -sh /data/task_D_D.zip | cut -f1) ==="
+
+    # ── Unzip ────────────────────────────────────────────────────────────────
+    echo "=== [$(date)] Extracting ==="
+    unzip -q /data/task_D_D.zip -d /data/
+    rm -f /data/task_D_D.zip
+    echo "=== [$(date)] Extracted. Free disk: $(df -h /data | tail -1 | awk '{print $4}') ==="
+
+    # ── Pack episodes → pkl ──────────────────────────────────────────────────
+    echo "=== [$(date)] Packing CALVIN episodes → pkl ==="
+    python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
+        --calvin_path /data/task_D_D \
+        --split       training \
+        --out         /data/calvin_episodes.pkl
+    echo "=== [$(date)] Packed. pkl size: $(du -sh /data/calvin_episodes.pkl | cut -f1) ==="
+
+    # Clean raw data to free space before upload
+    rm -rf /data/task_D_D
+
+    # ── Upload pkl to GCS ────────────────────────────────────────────────────
+    echo "=== [$(date)] Uploading calvin_episodes.pkl to GCS ==="
+    gsutil -m cp /data/calvin_episodes.pkl gs://sara-kaz-term/data/calvin_episodes.pkl
+    echo "=== [$(date)] Upload complete ==="
+    gsutil ls -l gs://sara-kaz-term/data/calvin_episodes.pkl
+
+    echo "=== [$(date)] DONE. Deploy calvin_baselines_job.yaml now. ==="
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calvin-data-prep
+  namespace: csun-ehuang-era
+  labels:
+    app: calvin-data-prep
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 28800  # 8 hr hard cap — no GPU preemption applies
+  template:
+    metadata:
+      labels:
+        app: calvin-data-prep
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: prep
+        image: ubuntu:22.04
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "8"
+            memory: "48Gi"
+          limits:
+            cpu: "8"
+            memory: "48Gi"
+          # NO nvidia.com/gpu — intentionally omitted
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: calvin-data-prep-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "300Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key

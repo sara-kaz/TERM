@@ -49,25 +49,10 @@ data:
     cd /workspace/TERM
 
     DATA_PKL=/data/calvin_episodes.pkl
-    if [ ! -f "${DATA_PKL}" ]; then
-      echo "=== Fetching CALVIN data ==="
-      GCS_OK=0
-      python3 scripts/gcs_sync.py download \
-          --bucket sara-kaz-term \
-          --prefix data/calvin_task_D_D \
-          --state_key "training/lang_annotations/auto_lang_ann.npy" \
-          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
-
-      if [ "${GCS_OK}" -eq 0 ]; then
-        echo "=== GCS miss — downloading from CALVIN server (~88 GB) ==="
-        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
-        unzip -q /data/task_D_D.zip -d /data/
-        rm -f /data/task_D_D.zip
-      fi
-
-      python3 scripts/pack_calvin_episodes.py \
-          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
-    fi
+    echo "=== Downloading calvin_episodes.pkl from GCS (~10 GB) ==="
+    wget -q --show-progress -O "${DATA_PKL}" \
+        "https://storage.googleapis.com/sara-kaz-term/data/calvin_episodes.pkl"
+    echo "pkl size: $(du -sh ${DATA_PKL} | cut -f1)"
 
     echo "=== Running CNN-LSTM on CALVIN (seed 42, 14 bins) ==="
     python -m baselines.finetune_cnn_lstm_lt \
@@ -165,25 +150,10 @@ data:
     cd /workspace/TERM
 
     DATA_PKL=/data/calvin_episodes.pkl
-    if [ ! -f "${DATA_PKL}" ]; then
-      echo "=== Fetching CALVIN data ==="
-      GCS_OK=0
-      python3 scripts/gcs_sync.py download \
-          --bucket sara-kaz-term \
-          --prefix data/calvin_task_D_D \
-          --state_key "training/lang_annotations/auto_lang_ann.npy" \
-          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
-
-      if [ "${GCS_OK}" -eq 0 ]; then
-        echo "=== GCS miss — downloading from CALVIN server (~88 GB) ==="
-        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
-        unzip -q /data/task_D_D.zip -d /data/
-        rm -f /data/task_D_D.zip
-      fi
-
-      python3 scripts/pack_calvin_episodes.py \
-          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
-    fi
+    echo "=== Downloading calvin_episodes.pkl from GCS (~10 GB) ==="
+    wget -q --show-progress -O "${DATA_PKL}" \
+        "https://storage.googleapis.com/sara-kaz-term/data/calvin_episodes.pkl"
+    echo "pkl size: $(du -sh ${DATA_PKL} | cut -f1)"
 
     echo "=== Running NumericalVLA on CALVIN (seed 42, 14 bins, action_dim=7) ==="
     python -m baselines.finetune_numvla_lt \
@@ -286,25 +256,10 @@ data:
     git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
 
     DATA_PKL=/data/calvin_episodes.pkl
-    if [ ! -f "${DATA_PKL}" ]; then
-      echo "=== Fetching CALVIN data ==="
-      GCS_OK=0
-      python3 /workspace/TERM/scripts/gcs_sync.py download \
-          --bucket sara-kaz-term \
-          --prefix data/calvin_task_D_D \
-          --state_key "training/lang_annotations/auto_lang_ann.npy" \
-          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
-
-      if [ "${GCS_OK}" -eq 0 ]; then
-        echo "=== GCS miss — downloading from CALVIN server ==="
-        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
-        unzip -q /data/task_D_D.zip -d /data/
-        rm -f /data/task_D_D.zip
-      fi
-
-      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
-          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
-    fi
+    echo "=== Downloading calvin_episodes.pkl from GCS (~10 GB) ==="
+    wget -q --show-progress -O "${DATA_PKL}" \
+        "https://storage.googleapis.com/sara-kaz-term/data/calvin_episodes.pkl"
+    echo "pkl size: $(du -sh ${DATA_PKL} | cut -f1)"
 
     echo "=== Running Octo on CALVIN (seed 42, 14 bins, 30 epochs, patience 25) ==="
     cd /workspace/TERM
@@ -409,25 +364,10 @@ data:
     git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
 
     DATA_PKL=/data/calvin_episodes.pkl
-    if [ ! -f "${DATA_PKL}" ]; then
-      echo "=== Fetching CALVIN data ==="
-      GCS_OK=0
-      python3 /workspace/TERM/scripts/gcs_sync.py download \
-          --bucket sara-kaz-term \
-          --prefix data/calvin_task_D_D \
-          --state_key "training/lang_annotations/auto_lang_ann.npy" \
-          --dest /data/task_D_D && GCS_OK=1 || GCS_OK=0
-
-      if [ "${GCS_OK}" -eq 0 ]; then
-        echo "=== GCS miss — downloading from CALVIN server ==="
-        wget -q -O /data/task_D_D.zip "http://calvin.cs.uni-freiburg.de/dataset/task_D_D.zip"
-        unzip -q /data/task_D_D.zip -d /data/
-        rm -f /data/task_D_D.zip
-      fi
-
-      python3 /workspace/TERM/scripts/pack_calvin_episodes.py \
-          --calvin_path /data/task_D_D --split training --out "${DATA_PKL}"
-    fi
+    echo "=== Downloading calvin_episodes.pkl from GCS (~10 GB) ==="
+    wget -q --show-progress -O "${DATA_PKL}" \
+        "https://storage.googleapis.com/sara-kaz-term/data/calvin_episodes.pkl"
+    echo "pkl size: $(du -sh ${DATA_PKL} | cut -f1)"
 
     echo "=== Running OpenVLA on CALVIN (seed 42, 14 bins, LoRA) ==="
     cd /workspace/TERM
