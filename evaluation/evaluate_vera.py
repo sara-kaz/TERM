@@ -73,7 +73,17 @@ def build_vera_from_cfg(cfg: dict, device: str) -> VERAModel:
 def load_checkpoint(model: VERAModel, checkpoint_path: str, device: str):
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt.get("model_state", ckpt)
-    missing, unexpected = model.load_state_dict(state, strict=False)
+    # Remap old key names saved before model refactor
+    _KEY_REMAP = {"action_head.": "action_bin_head.", "action_reg_head.": "action_chunk_head."}
+    remapped = {}
+    for k, v in state.items():
+        new_k = k
+        for old, new in _KEY_REMAP.items():
+            if k.startswith(old):
+                new_k = new + k[len(old):]
+                break
+        remapped[new_k] = v
+    missing, unexpected = model.load_state_dict(remapped, strict=False)
     if missing:
         print(f"[load_checkpoint] missing keys ({len(missing)}): {missing[:6]}{'…' if len(missing) > 6 else ''}", flush=True)
     if unexpected:
