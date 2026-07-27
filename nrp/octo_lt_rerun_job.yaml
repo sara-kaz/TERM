@@ -1,0 +1,149 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Octo LT re-run with patience=25, epochs=30 (matching NumericalVLA settings)
+# Namespace: csun-ehuang-era
+#
+# The original octo-ft job used patience=10 / epochs=20.
+# This re-run gives Octo a fair number of epochs for comparison.
+#
+# Deploy:
+#   kubectl apply -f nrp/octo_lt_rerun_job.yaml -n csun-ehuang-era
+#
+# Monitor:
+#   kubectl logs -f octo-lt-p25-<hash> -n csun-ehuang-era
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: octo-lt-p25-scripts
+  namespace: csun-ehuang-era
+data:
+  run.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Installing system packages ==="
+    apt-get update -qq && apt-get install -y -qq git wget
+
+    echo "=== Installing dependencies ==="
+    /opt/conda/bin/pip install --quiet "jax[cuda12]"
+    /opt/conda/bin/python -c "import jax,sys; d=jax.devices(); g=[x for x in d if x.platform=='gpu']; print('[jax-verify] jax='+jax.__version__+' gpu='+str(len(g)),flush=True); sys.exit('ERROR: No GPU on this node. devices='+str(d)) if not g else 0"
+    /opt/conda/bin/pip install --quiet "tensorflow-datasets>=4.5.0,<4.9.0" "tensorflow-metadata<1.14.0" pillow
+    /opt/conda/bin/pip install --quiet "tensorflow-probability>=0.22.0,<0.24.0"
+    /opt/conda/bin/pip install --quiet distrax einops ml-collections absl-py huggingface_hub \
+        "transformers>=4.35.0,<4.41.0" sentencepiece
+    /opt/conda/bin/pip install --quiet "git+https://github.com/kvablack/dlimp.git"
+    /opt/conda/bin/pip install --quiet "git+https://github.com/octo-models/octo.git" flax optax chex pyyaml
+    /opt/conda/bin/pip install --quiet google-cloud-storage
+
+    echo "=== Cloning TERM repo ==="
+    git clone https://github.com/sara-kaz/TERM.git /workspace/TERM
+
+    DATA_PKL=/data/language_table_episodes.pkl
+    if [ ! -f "${DATA_PKL}" ]; then
+      echo "=== Downloading Language-Table data ==="
+      python /workspace/TERM/scripts/convert_language_table.py \
+          --tfds_dir gs://gresearch/robotics/language_table/0.0.1 \
+          --out_dir  /data/lt_raw --max_eps 3000
+      python3 /workspace/TERM/scripts/pack_lt_episodes.py \
+          --lt_dir /data/lt_raw --out /data/language_table_episodes.pkl
+      rm -rf /data/lt_raw
+    fi
+
+    echo "=== Checking GCS for resume checkpoint ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py download \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --state_key state.json --dest /results/checkpoint \
+      && RESUME_FLAG="--resume_from /results/checkpoint" || RESUME_FLAG=""
+
+    echo "=== Running Octo LT fine-tuning (seed 42, patience=25, epochs=30) ==="
+    cd /workspace/TERM
+    python -m baselines.finetune_octo_lt \
+        --data_path   /data/language_table_episodes.pkl \
+        --output_dir  /results \
+        --seed        42 \
+        --epochs      30 \
+        --batch_size  16 \
+        --lr_backbone 1e-5 \
+        --lr_head     1e-4 \
+        --patience    25 \
+        ${RESUME_FLAG}
+
+    echo "=== Uploading checkpoint to GCS (non-fatal) ==="
+    python3 /workspace/TERM/scripts/gcs_sync.py upload \
+        --bucket "${GCS_BUCKET}" --prefix "${GCS_PREFIX}" \
+        --src /results/checkpoint || echo "[gcs] Upload skipped (bucket unreachable)"
+
+    echo "=== Result ==="
+    cat /results/results.json
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: octo-lt-p25
+  namespace: csun-ehuang-era
+  labels:
+    app: finetune
+    model: octo
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 21600  # 6 hr hard cap
+  template:
+    metadata:
+      labels:
+        app: finetune
+        model: octo
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: train
+        image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "/scripts/run.sh"]
+        env:
+        - name: XLA_PYTHON_CLIENT_PREALLOCATE
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/gcs-key/key.json"
+        - name: GCS_BUCKET
+          value: "sara-kaz-term"
+        - name: GCS_PREFIX
+          value: "checkpoints/octo_lt_p25"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: data-vol
+          mountPath: /data
+        - name: results-vol
+          mountPath: /results
+        - name: gcs-key
+          mountPath: /gcs-key
+          readOnly: true
+      volumes:
+      - name: scripts
+        configMap:
+          name: octo-lt-p25-scripts
+          defaultMode: 0755
+      - name: data-vol
+        emptyDir:
+          sizeLimit: "50Gi"
+      - name: results-vol
+        emptyDir:
+          sizeLimit: "5Gi"
+      - name: gcs-key
+        secret:
+          secretName: gcs-key
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
