@@ -31,7 +31,7 @@ data:
     CKPT="/workspace/vera_lt_s42.pt"
 
     echo "=== System packages ==="
-    apt-get update -qq && apt-get install -y -qq git wget libgl1
+    apt-get update -qq && apt-get install -y -qq git wget libgl1 libglib2.0-0 libsm6 libxrender1
 
     echo "=== Python deps ==="
     pip install --quiet pybullet dm-env numpy pillow
@@ -135,7 +135,7 @@ data:
     CKPT="/workspace/vera_lt_s123.pt"
 
     echo "=== System packages ==="
-    apt-get update -qq && apt-get install -y -qq git wget libgl1
+    apt-get update -qq && apt-get install -y -qq git wget libgl1 libglib2.0-0 libsm6 libxrender1
 
     echo "=== Python deps ==="
     pip install --quiet pybullet dm-env numpy pillow
