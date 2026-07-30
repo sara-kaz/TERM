@@ -1,5 +1,5 @@
 """
-VERA — CALVIN Ablation Runner
+TERM — CALVIN Ablation Runner
 ==============================
 Runs 9 ablation variants × 3 seeds on CALVIN D→D (compact grid).
 
@@ -18,7 +18,7 @@ Usage
   # Resume from a specific ablation index (0-8) if a run was interrupted
   python scripts/run_calvin_ablations.py --calvin_path /path/to/task_D_D --start_from 3
 
-  # First six ablations only (Full VERA, BC, No E_exp, No E_act, No lang, No history TF):
+  # First six ablations only (Full TERM, BC, No E_exp, No E_act, No lang, No history TF):
   python scripts/run_calvin_ablations.py --calvin_path /path/to/task_D_D --core6
 
   # Custom range: ablation indices i with start_from <= i < end_after (e.g. 0..5 = six runs)
@@ -27,7 +27,7 @@ Usage
 Seeds used: 42, 123, 456  (same as partner's Language-Table runs)
 
 Ablation variants (9 total):
-  0  Full VERA           — all streams active
+  0  Full TERM           — all streams active
   1  BC/SFT baseline     — no language feedback, no history transformer
   2  No E_exp            — Stream 3b off (consequence token disabled)
   3  No E_act            — Stream 3a off (action narration disabled)
@@ -52,14 +52,14 @@ import torch
 import yaml
 
 # ── Ablation definitions ─────────────────────────────────────────────────────
-# (name, vera_overrides, training_overrides)
+# (name, term_overrides, training_overrides)
 # Matches the 9 ablations agreed with partner for cross-environment comparison.
 
 ABLATIONS = [
     (
-        "full_vera",
-        "Full VERA (all streams)",
-        {},                                                     # vera overrides
+        "full_term",
+        "Full TERM (all streams)",
+        {},                                                     # term overrides
         {},                                                     # training overrides
     ),
     (
@@ -122,7 +122,7 @@ SEEDS = [42, 123, 456]
 @contextlib.contextmanager
 def _corrupt_consequence_ctx():
     """Patch verbalize_consequence for one run; always restore afterward."""
-    import models.vera_model as vm
+    import models.term_model as vm
 
     _RANDOM_PHRASES = [
         "The weather is sunny today",
@@ -153,8 +153,8 @@ def _corrupt_consequence_ctx():
 
 def _run_is_complete(run_out: Path, min_epochs_for_skip: int = 3) -> bool:
     """True if this seed folder looks like a finished training run (not a crash)."""
-    log_path = run_out / "sft_vera_log.json"
-    if not (run_out / "best_sft_vera.pt").exists() or not log_path.exists():
+    log_path = run_out / "sft_term_log.json"
+    if not (run_out / "best_sft_term.pt").exists() or not log_path.exists():
         return False
     with open(log_path) as f:
         log = json.load(f)
@@ -164,16 +164,16 @@ def _run_is_complete(run_out: Path, min_epochs_for_skip: int = 3) -> bool:
 
 def _find_resume_checkpoint(run_out: Path) -> Optional[str]:
     latest_ep, latest_pt = 0, None
-    for pt in sorted(run_out.glob("sft_vera_epoch*.pt")):
+    for pt in sorted(run_out.glob("sft_term_epoch*.pt")):
         try:
-            ep = int(pt.stem.replace("sft_vera_epoch", ""))
+            ep = int(pt.stem.replace("sft_term_epoch", ""))
         except ValueError:
             continue
         if ep > latest_ep:
             latest_ep, latest_pt = ep, pt
     if latest_pt is not None:
         return str(latest_pt)
-    best = run_out / "best_sft_vera.pt"
+    best = run_out / "best_sft_term.pt"
     if best.exists():
         return str(best)
     return None
@@ -193,7 +193,7 @@ def run_all(
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
     import random
-    from training.sft_trainer_vera import sft_train
+    from training.sft_trainer_term import sft_train
 
     with open(base_cfg_path) as f:
         base_cfg = yaml.safe_load(f)
@@ -210,22 +210,22 @@ def run_all(
     end = n_abl if end_after is None else min(int(end_after), n_abl)
     start_from = max(0, min(int(start_from), n_abl))
     selected = [
-        (i, slug, display, vera_ov, train_ov)
-        for i, (slug, display, vera_ov, train_ov) in enumerate(ABLATIONS)
+        (i, slug, display, term_ov, train_ov)
+        for i, (slug, display, term_ov, train_ov) in enumerate(ABLATIONS)
         if start_from <= i < end
     ]
     if not selected:
         print(f"[calvin] No ablations in range start_from={start_from} end_after={end} (n={n_abl})")
         return
 
-    for i, (_slug, display, _vera, _train) in enumerate(ABLATIONS):
+    for i, (_slug, display, _term, _train) in enumerate(ABLATIONS):
         if i < start_from or i >= end:
             print(f"[skip] [{i}] {display}")
 
     total_runs = len(selected) * len(SEEDS)
     run_idx    = 0
 
-    for abl_idx, slug, display, vera_ov, train_ov in selected:
+    for abl_idx, slug, display, term_ov, train_ov in selected:
 
         summary[slug] = {}
 
@@ -237,9 +237,9 @@ def run_all(
 
             cfg = copy.deepcopy(base_cfg)
 
-            # Apply vera overrides
-            for k, v in vera_ov.items():
-                cfg["vera"][k] = v
+            # Apply term overrides
+            for k, v in term_ov.items():
+                cfg["term"][k] = v
 
             # Apply training overrides (except corrupt_consequence — handled below)
             for k, v in train_ov.items():
@@ -255,7 +255,7 @@ def run_all(
             cfg["training"]["output_dir"] = str(run_out)
 
             if skip_complete and not dry_run and _run_is_complete(run_out):
-                log_path = run_out / "sft_vera_log.json"
+                log_path = run_out / "sft_term_log.json"
                 with open(log_path) as f:
                     log = json.load(f)
                 best_val = max(row["val_acc"] for row in log) if log else 0.0
@@ -291,7 +291,7 @@ def run_all(
             elapsed = time.time() - t0
 
             # Read best val acc from saved log
-            log_path = run_out / "sft_vera_log.json"
+            log_path = run_out / "sft_term_log.json"
             best_val = 0.0
             if log_path.exists():
                 with open(log_path) as f:
@@ -327,13 +327,13 @@ def run_all(
     # Save summary JSON
     results_path = out_root / "calvin_ablation_summary.json"
     full_summary = {}
-    for _, slug, display, vera_ov, train_ov in selected:
+    for _, slug, display, term_ov, train_ov in selected:
         if slug not in summary:
             continue
         vals = list(summary[slug].values())
         full_summary[slug] = {
             "display":   display,
-            "vera_overrides": vera_ov,
+            "term_overrides": term_ov,
             "seeds":     summary[slug],
             "mean_val_acc": float(np.mean(vals)),
             "std_val_acc":  float(np.std(vals)),
@@ -346,7 +346,7 @@ def run_all(
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="VERA CALVIN ablation runner")
+    parser = argparse.ArgumentParser(description="TERM CALVIN ablation runner")
     parser.add_argument(
         "--calvin_path", required=True,
         help="Path to CALVIN task_D_D root (contains training/ and validation/ dirs)",
@@ -370,7 +370,7 @@ def main():
     )
     parser.add_argument(
         "--core6", action="store_true",
-        help="Shorthand for --start_from 0 --end_after 6 (Full VERA, BC, No E_exp, No E_act, No lang, No history TF)",
+        help="Shorthand for --start_from 0 --end_after 6 (Full TERM, BC, No E_exp, No E_act, No lang, No history TF)",
     )
     parser.add_argument(
         "--dry_run", action="store_true",

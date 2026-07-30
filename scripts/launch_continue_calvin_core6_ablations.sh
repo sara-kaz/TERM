@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Continue CALVIN core-6 ablations on a dedicated GPU (default: GPU 0).
-# Skips finished full_vera / bc_baseline; resumes no_exp seed42; runs no_act, no_lang, no_history_tf.
+# Skips finished full_term / bc_baseline; resumes no_exp seed42; runs no_act, no_lang, no_history_tf.
 #
 #   cd ~/work/RLConditionedVLA
 #   bash scripts/launch_continue_calvin_core6_ablations.sh        # background

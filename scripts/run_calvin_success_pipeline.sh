@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fully automated CALVIN embodied pipeline (runs steps in order, unattended):
 #   1. Proprio stats
-#   2. Sim-aligned VERA train (or wait if already running)
+#   2. Sim-aligned TERM train (or wait if already running)
 #   3. Rollout hyperparameter sweep (200 sequences × configs)
 #   4. Pick best inference config
 #   5. Official 1000-chain eval with best config
@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${VENV_PYTHON:-$HOME/work/ConvIR with Lewin/venv/bin/python}"
 CALVIN="${CALVIN_DATA:-$HOME/calvin_task_D/task_D_D}"
 CALVIN_ROOT="${CALVIN_ROOT:-$HOME/work/calvin}"
-WARMSTART="${WARMSTART:-$ROOT/checkpoints/calvin_core6_ltdev/full_vera/seed123/best_sft_vera.pt}"
+WARMSTART="${WARMSTART:-$ROOT/checkpoints/calvin_core6_ltdev/full_term/seed123/best_sft_term.pt}"
 TRAIN_GPU="${TRAIN_GPU:-1}"
 EVAL_GPU="${EVAL_GPU:-2}"
 SWEEP_SEQS="${SWEEP_SEQS:-200}"
@@ -24,11 +24,11 @@ FINAL_SEQS="${FINAL_SEQS:-1000}"
 SKIP_SWEEP="${SKIP_SWEEP:-0}"
 SKIP_TRAIN_IF_CKPT="${SKIP_TRAIN_IF_CKPT:-0}"
 PIPE_DIR="$ROOT/checkpoints/calvin_pipeline"
-SIM_DIR="$ROOT/checkpoints/calvin_sim_vera/seed123"
+SIM_DIR="$ROOT/checkpoints/calvin_sim_term/seed123"
 STATUS="$PIPE_DIR/pipeline_status.json"
 REPORT="$PIPE_DIR/final_report.json"
 LOCK="$PIPE_DIR/pipeline.lock"
-CKPT="$SIM_DIR/best_sft_vera.pt"
+CKPT="$SIM_DIR/best_sft_term.pt"
 SWEEP_DIR="$SIM_DIR/rollout_sweep"
 BEST_CFG="$PIPE_DIR/best_rollout_config.json"
 FINAL_OUT="$SIM_DIR/calvin_rollout_eval_1000_best"
@@ -96,7 +96,7 @@ write_status "{\"phase\":\"starting\",\"train_gpu\":$TRAIN_GPU,\"eval_gpu\":$EVA
 log "Stopping old watchers / proprio-only jobs…"
 pkill -f "configs/calvin_proprio_ft.yaml" 2>/dev/null || true
 pkill -f "watch_proprio_and_eval.sh" 2>/dev/null || true
-pkill -f "watch_sim_vera_and_eval.sh" 2>/dev/null || true
+pkill -f "watch_sim_term_and_eval.sh" 2>/dev/null || true
 sleep 2
 
 # ── Step 1: proprio stats ─────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ python3 "$ROOT/scripts/compute_calvin_proprio_stats.py" --calvin_path "$CALVIN"
 write_status "{\"phase\":\"stats_done\"}"
 
 # ── Step 2: sim-aligned training ──────────────────────────────────────────────
-SIM_TRAIN_RE='calvin_vera_sim\.yaml|checkpoints/calvin_sim_vera'
+SIM_TRAIN_RE='calvin_term_sim\.yaml|checkpoints/calvin_sim_term'
 
 sim_train_running() {
   pgrep -af "$SIM_TRAIN_RE" 2>/dev/null | grep -v "run_calvin_success_pipeline" | grep -q python || return 1
@@ -120,7 +120,7 @@ if sim_train_running; then
 elif [[ -f "$CKPT" && "$SKIP_TRAIN_IF_CKPT" == "1" ]]; then
   log "Step 2/5: checkpoint exists — skipping training ($CKPT)"
 else
-  log "Step 2/5: sim-aligned VERA training on GPU $TRAIN_GPU (40 epochs)"
+  log "Step 2/5: sim-aligned TERM training on GPU $TRAIN_GPU (40 epochs)"
   write_status "{\"phase\":\"training\",\"out_dir\":\"$SIM_DIR\"}"
   export CUDA_VISIBLE_DEVICES="$TRAIN_GPU"
   cd "$ROOT"
@@ -128,8 +128,8 @@ else
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
-cfg = yaml.safe_load(Path('configs/calvin_vera_sim.yaml').read_text())
+from training.sft_trainer_term import train
+cfg = yaml.safe_load(Path('configs/calvin_term_sim.yaml').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 train(cfg, resume_from='$WARMSTART')
 " 2>&1 | tee -a "$SIM_DIR/train.log"
@@ -155,7 +155,7 @@ else
   for MAG in 0.20 0.28 0.32 0.40; do
     for MODE in hybrid regression; do
       OUT="$SWEEP_DIR/${MODE}_mag${MAG}"
-      if [[ -f "$OUT/vera_calvin_summary.json" ]]; then
+      if [[ -f "$OUT/term_calvin_summary.json" ]]; then
         log "  skip existing $OUT"
         continue
       fi
@@ -166,7 +166,7 @@ else
 
   # Extra: reset-history variant on default hybrid config
   OUT="$SWEEP_DIR/hybrid_mag0.32_reset_hist"
-  if [[ ! -f "$OUT/vera_calvin_summary.json" ]]; then
+  if [[ ! -f "$OUT/term_calvin_summary.json" ]]; then
     log "  sweep: hybrid mag=0.32 reset_history"
     run_eval "$OUT" hybrid 0.32 30 "$SWEEP_SEQS" 1
   fi
@@ -194,7 +194,7 @@ write_status "{\"phase\":\"final_eval\",\"eval_out\":\"$FINAL_OUT\",\"num_sequen
 
 run_eval "$FINAL_OUT" "$BEST_MODE" "$BEST_MAG" "$BEST_HOLD" "$FINAL_SEQS" "$BEST_RESET"
 
-SUMMARY="$FINAL_OUT/vera_calvin_summary.json"
+SUMMARY="$FINAL_OUT/term_calvin_summary.json"
 if [[ ! -f "$SUMMARY" ]]; then
   log "ERROR: final eval missing $SUMMARY"
   write_status "{\"phase\":\"failed\",\"reason\":\"no final summary\"}"

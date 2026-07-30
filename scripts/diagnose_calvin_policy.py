@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from data.trajectory_dataset import TrajectoryDataset, load_calvin
-from evaluation.evaluate_vera import build_vera_from_cfg, load_checkpoint
-from evaluation.vera_calvin_policy import discretise_rel_action, postprocess_rel_action
+from evaluation.evaluate_term import build_term_from_cfg, load_checkpoint
+from evaluation.term_calvin_policy import discretise_rel_action, postprocess_rel_action
 
 
 def main():
@@ -56,7 +56,7 @@ def main():
     ds = TrajectoryDataset(episodes, **ds_kwargs)
     loader = torch.utils.data.DataLoader(ds, batch_size=32, shuffle=False, num_workers=2)
 
-    model = build_vera_from_cfg(cfg, device)
+    model = build_term_from_cfg(cfg, device)
     load_checkpoint(model, args.checkpoint, device)
     model.eval()
 

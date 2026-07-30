@@ -1,15 +1,15 @@
 """
-Plot training curves for VERA paper (Figure 2).
+Plot training curves for TERM paper (Figure 2).
 
 Usage
 -----
   python scripts/plot_results.py \
-      --sft  checkpoints/vera_full/train_log.json \
-      --rl   checkpoints/vera_full/sample_efficiency.csv \
+      --sft  checkpoints/term_full/train_log.json \
+      --rl   checkpoints/term_full/sample_efficiency.csv \
               checkpoints/ablation_A/sample_efficiency.csv \
               checkpoints/ablation_F/sample_efficiency.csv \
               checkpoints/ablation_G/sample_efficiency.csv \
-      --labels "VERA (full)" "Abl.A — Memoryless" "Abl.F — Act only" "Abl.G — Exp only" \
+      --labels "TERM (full)" "Abl.A — Memoryless" "Abl.F — Act only" "Abl.G — Exp only" \
       --out  figures/training_curves.pdf
 
 Output
@@ -87,7 +87,7 @@ def main():
     rl_data = [load_rl_csv(p) for p in args.rl]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle("VERA — Training Dynamics", fontsize=13, fontweight="bold")
+    fig.suptitle("TERM — Training Dynamics", fontsize=13, fontweight="bold")
 
     # ── Panel 1: SFT ──────────────────────────────────────────────────────────
     epochs = sft["epoch"]

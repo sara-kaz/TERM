@@ -1,4 +1,4 @@
-# DAgger round 1 — after calvin_vera_max continuous pretrain.
+# DAgger round 1 — after calvin_term_max continuous pretrain.
 
 model:
   num_actions:    14
@@ -14,7 +14,7 @@ model:
   action_dim:     7
   proprio_dim:    15
 
-vera:
+term:
   use_lang_feedback:      true
   use_temporal_history:   true
   use_reward_gate:        true
@@ -50,4 +50,4 @@ training:
   save_every:               5
   output_dir:               checkpoints/calvin_max_dagger_r1/seed123/
 
-warmstart: checkpoints/calvin_max/seed123/best_sft_vera.pt
+warmstart: checkpoints/calvin_max/seed123/best_sft_term.pt

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Train full MCIL (static + gripper + rel actions) — multi-day, targets ~70%+ 1-task success.
-# This is the official CALVIN baseline architecture, NOT VERA.
+# This is the official CALVIN baseline architecture, NOT TERM.
 #
 # Usage:
 #   CALVIN_DATA=$HOME/calvin_task_D/task_D_D TRAIN_GPU=1 \

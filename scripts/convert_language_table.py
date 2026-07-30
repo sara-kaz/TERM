@@ -1,5 +1,5 @@
 """
-Convert Language-Table RLDS dataset → VERA episode format
+Convert Language-Table RLDS dataset → TERM episode format
 ==========================================================
 Language-Table (Lynch et al. 2023) is distributed as TFRecord / RLDS files.
 This script converts them to the `root/episode_XXX/steps.pkl` layout that
@@ -24,13 +24,13 @@ Usage
 -----
   python scripts/convert_language_table.py \
       --tfds_dir  ./language_table_tfds \
-      --out_dir   ./language_table_vera \
+      --out_dir   ./language_table_term \
       --split     train \
       --max_eps   5000
 
 Output layout
 -------------
-  ./language_table_vera/
+  ./language_table_term/
     episode_000000/
       steps.pkl    ← list of step dicts: {obs, action, reward, instruction}
     episode_000001/
@@ -47,7 +47,7 @@ Each steps.pkl is a list of dicts:
 
 Then set in config.yaml:
   data:
-    episodes_path: ./language_table_vera
+    episodes_path: ./language_table_term
     dataset_type:  language_table
   model:
     action_dim:    2
@@ -157,7 +157,7 @@ def convert(tfds_dir: str, out_dir: str, split: str, max_eps: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert Language-Table RLDS → VERA episode format"
+        description="Convert Language-Table RLDS → TERM episode format"
     )
     parser.add_argument("--tfds_dir",  required=True,
                         help="Directory containing the TFDS Language-Table data")

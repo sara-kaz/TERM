@@ -1,6 +1,6 @@
 # TERM — Trustworthy Embodied Robot with Memory
 
-**TERM** is a closed-loop robot learning framework built around **VERA** (Vision-Experience-Reasoning-Action), a five-stream Vision-Language-Action (VLA) policy that grounds action decisions in both language instructions and the robot's own experiential memory.
+**TERM** is a closed-loop robot learning framework built around **TERM** (Vision-Experience-Reasoning-Action), a five-stream Vision-Language-Action (VLA) policy that grounds action decisions in both language instructions and the robot's own experiential memory.
 
 > Submitted to AAAI 2027 (anonymous review)
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Standard VLA policies are open-loop: they map observations to actions without any feedback about what actually happened. VERA closes this loop with two novel experiential streams:
+Standard VLA policies are open-loop: they map observations to actions without any feedback about what actually happened. TERM closes this loop with two novel experiential streams:
 
 - **E_act** — a natural-language narration of the action the robot just took (e.g., *"I pushed the object to the right"*), gated by a reward-conditioned MLP.
 - **E_exp** — a verbalization of the outcome (e.g., *"The object moved 3 cm closer to the target; reward +0.12"*), giving the policy grounded spatial feedback at every step.
@@ -54,16 +54,16 @@ TERM/Latest/
 ├── envs/                  # Simulation environment wrappers
 │   └── sim_env.py
 ├── evaluation/            # Rollout evaluation scripts
-│   ├── evaluate_vera.py
-│   ├── vera_calvin_policy.py
-│   └── vera_language_table_policy.py
+│   ├── evaluate_term.py
+│   ├── term_calvin_policy.py
+│   └── term_language_table_policy.py
 ├── models/                # Core model definitions
-│   ├── vera_model.py      # VERA five-stream VLA policy
+│   ├── term_model.py      # TERM five-stream VLA policy
 │   └── vla_model.py       # Baseline VLA (no feedback streams)
 ├── scripts/               # Training launch scripts and utilities
 ├── training/              # SFT and RL trainers
-│   ├── sft_trainer_vera.py
-│   └── rl_trainer_vera.py
+│   ├── sft_trainer_term.py
+│   └── rl_trainer_term.py
 ├── vendor/                # Vendored dependencies
 │   └── language-table/    # Language-Table environment (Google DeepMind)
 ├── requirements.txt
@@ -104,14 +104,14 @@ data:
 ### 2. Supervised Fine-Tuning (Behavioural Cloning)
 
 ```bash
-python -m training.sft_trainer_vera --config configs/config.yaml
+python -m training.sft_trainer_term --config configs/config.yaml
 ```
 
 ### 3. Online RL Fine-Tuning
 
 ```bash
-python -m training.rl_trainer_vera --config configs/config.yaml \
-    --checkpoint checkpoints/best_sft_vera.pt
+python -m training.rl_trainer_term --config configs/config.yaml \
+    --checkpoint checkpoints/best_sft_term.pt
 ```
 
 ### 4. Evaluation
@@ -119,47 +119,47 @@ python -m training.rl_trainer_vera --config configs/config.yaml \
 ```bash
 # Language-Table
 python scripts/run_language_table_rollout_eval.py \
-    --checkpoint checkpoints/best_sft_vera.pt \
+    --checkpoint checkpoints/best_sft_term.pt \
     --config configs/config.yaml
 
 # CALVIN
 python scripts/run_calvin_rollout_eval.py \
-    --checkpoint checkpoints/best_sft_vera.pt \
-    --config configs/calvin_vera_max.yaml
+    --checkpoint checkpoints/best_sft_term.pt \
+    --config configs/calvin_term_max.yaml
 ```
 
 ---
 
 ## Ablation Flags
 
-VERA's streams can be individually disabled via config to reproduce any ablation from the paper:
+TERM's streams can be individually disabled via config to reproduce any ablation from the paper:
 
 | Ablation | Flag | Description |
 |----------|------|-------------|
-| A | `vera.use_lang_feedback: false` | Base VLA — no language feedback |
-| B | `vera.use_temporal_history: false` | Flat positional history (no TemporalHistoryTransformer) |
-| C | `vera.use_reward_gate: false` | No reward gate on E_act |
-| D | `vera.alignment_loss_coef: 0.0` | No contrastive alignment loss |
-| F | `vera.use_consequence_token: false` | Action narration only (no E_exp) |
-| G | `vera.use_consequence_token: true` + no E_act | Outcome token only |
+| A | `term.use_lang_feedback: false` | Base VLA — no language feedback |
+| B | `term.use_temporal_history: false` | Flat positional history (no TemporalHistoryTransformer) |
+| C | `term.use_reward_gate: false` | No reward gate on E_act |
+| D | `term.alignment_loss_coef: 0.0` | No contrastive alignment loss |
+| F | `term.use_consequence_token: false` | Action narration only (no E_exp) |
+| G | `term.use_consequence_token: true` + no E_act | Outcome token only |
 
 ---
 
 ## Benchmarks
 
-| Benchmark | Metric | VERA (full) | Base VLA |
+| Benchmark | Metric | TERM (full) | Base VLA |
 |-----------|--------|-------------|----------|
 | Language-Table | Success rate | See paper | — |
 | CALVIN (D→D) | Avg. tasks completed / 5 | See paper | — |
 
-Full numbers and ablation table in `docs/aaai2027_vera_submission.tex`.
+Full numbers and ablation table in `docs/aaai2027_term_submission.tex`.
 
 ---
 
 ## Citation
 
 ```bibtex
-@inproceedings{vera2027,
+@inproceedings{term2027,
   title     = {TERM: Trustworthy Embodied Robot with Memory via Closed-Loop Experiential Feedback},
   author    = {Anonymous},
   booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},

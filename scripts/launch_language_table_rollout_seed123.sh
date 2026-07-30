@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${VENV_PYTHON:-$HOME/work/ConvIR with Lewin/venv/bin/python}"
 LT_ROOT="${LANGUAGE_TABLE_ROOT:-$ROOT/vendor/language-table}"
-CKPT="${CKPT:-$ROOT/checkpoints/Language_table/seed123/best_sft_vera.pt}"
+CKPT="${CKPT:-$ROOT/checkpoints/Language_table/seed123/best_sft_term.pt}"
 # GPU 1 by default — leave GPU 0 free for CALVIN rollout (launch_calvin_rollout_seed123.sh).
 GPU="${CUDA_VISIBLE_DEVICES:-1}"
 

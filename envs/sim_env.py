@@ -394,10 +394,10 @@ class BabyAIEnv(BaseEnv):
 
 class LanguageTableEnv(BaseEnv):
     """
-    Language-Table PyBullet environment wrapper for VERA RL training.
+    Language-Table PyBullet environment wrapper for TERM RL training.
 
     Adapts the dm_env/TimeStep interface from DeepMind's language_table package
-    into the VERA BaseEnv interface:
+    into the TERM BaseEnv interface:
       reset() → {"frame": np.ndarray (H,W,3) uint8, "instruction": str}
       step(action_idx: int) → (obs, reward, done, info)
 

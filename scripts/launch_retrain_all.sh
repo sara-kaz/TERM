@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch VERA retrain after preflight passes.
+# Launch TERM retrain after preflight passes.
 # Usage:
 #   bash scripts/launch_retrain_all.sh                    # preflight + CALVIN core6 on GPU 0
 #   bash scripts/launch_retrain_all.sh --lt /path/to/lt   # also LT on GPU 1
@@ -23,8 +23,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== VERA preflight ==="
-"$PY" "$ROOT/scripts/preflight_vera.py" --calvin_path "$CALVIN_PATH"
+echo "=== TERM preflight ==="
+"$PY" "$ROOT/scripts/preflight_term.py" --calvin_path "$CALVIN_PATH"
 
 if [[ "$PREFLIGHT_ONLY" -eq 1 ]]; then
   echo "Preflight-only mode — done."
@@ -49,7 +49,7 @@ if [[ -n "$LT_DATA" ]]; then
   LT_OUT="$ROOT/checkpoints/Language_table_fixed"
   mkdir -p "$LT_OUT"
   echo "=== Language-Table training (GPU $GPU_LT) ==="
-  CUDA_VISIBLE_DEVICES="$GPU_LT" nohup "$PY" -u -m training.sft_trainer_vera \
+  CUDA_VISIBLE_DEVICES="$GPU_LT" nohup "$PY" -u -m training.sft_trainer_term \
     --config configs/config.yaml \
     --episodes_path "$LT_DATA" \
     --output_dir "$LT_OUT" \

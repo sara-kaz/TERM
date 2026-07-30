@@ -1,4 +1,4 @@
-# Short CALVIN finetune with robot_obs (proprio) — warm-start from best_sft_vera.pt
+# Short CALVIN finetune with robot_obs (proprio) — warm-start from best_sft_term.pt
 # Goal: improve closed-loop task success in PyBullet eval.
 
 model:
@@ -15,7 +15,7 @@ model:
   action_dim:     7
   proprio_dim:    15   # CALVIN robot_obs
 
-vera:
+term:
   use_lang_feedback:      true
   use_temporal_history:   true
   use_reward_gate:        true

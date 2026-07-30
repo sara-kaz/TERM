@@ -1,8 +1,8 @@
 """
-CALVIN comparison runner for VERA — **same experiment matrix as Language-Table.**
+CALVIN comparison runner for TERM — **same experiment matrix as Language-Table.**
 
 Protocol (matches `scripts/run_language_table_comparisons.py` in sibling setups):
-  - 12 numbered conditions (01–12), same vera overrides / patches
+  - 12 numbered conditions (01–12), same term overrides / patches
   - seeds: 42, 123, 456
   - epochs / batch / lr / val_frac / eval episodes enforced via `_common_cfg`
   - skip completed seeds unless `--force`
@@ -63,7 +63,7 @@ def _patch_action_stream_off(enable: bool):
         yield
         return
     import torch
-    import models.vera_model as vm
+    import models.term_model as vm
 
     orig_forward = vm.ActionLanguageFeedbackEncoder.forward
 
@@ -91,7 +91,7 @@ def _patch_action_stream_off(enable: bool):
 
 @contextlib.contextmanager
 def _patch_consequence_text(mode: str):
-    import models.vera_model as vm
+    import models.term_model as vm
 
     orig = vm.verbalize_consequence
     rng = np.random.default_rng(seed=0)
@@ -120,7 +120,7 @@ def _patch_consequence_text(mode: str):
 
 
 CONDITIONS = [
-    ("01_vera_full", "VERA (full)", {}, False, "normal"),
+    ("01_term_full", "TERM (full)", {}, False, "normal"),
     (
         "02_bc_sft",
         "BC/SFT baseline",
@@ -197,8 +197,8 @@ def _device():
 def run(args):
     sys.path.insert(0, str(Path(__file__).parent.parent))
     try:
-        from training.sft_trainer_vera import sft_train
-        from evaluation.evaluate_vera import build_vera_from_cfg, evaluate_once, load_checkpoint
+        from training.sft_trainer_term import sft_train
+        from evaluation.evaluate_term import build_term_from_cfg, evaluate_once, load_checkpoint
     except ModuleNotFoundError as e:
         if e.name == "clip":
             raise SystemExit(
@@ -222,20 +222,20 @@ def run(args):
     out_root.mkdir(parents=True, exist_ok=True)
     summary = {}
 
-    for idx, (slug, name, vera_overrides, action_off, consequence_mode) in enumerate(
+    for idx, (slug, name, term_overrides, action_off, consequence_mode) in enumerate(
         CONDITIONS, start=1
     ):
         if idx < args.start_from:
             continue
 
         print(f"\n{'=' * 70}\n[{idx:02d}] {name}\n{'=' * 70}")
-        summary[slug] = {"name": name, "seeds": {}, "vera_overrides": vera_overrides}
+        summary[slug] = {"name": name, "seeds": {}, "term_overrides": term_overrides}
 
         for seed in SEEDS:
             seed_dir = out_root / slug / f"seed{seed}"
             seed_dir.mkdir(parents=True, exist_ok=True)
-            ckpt_path = seed_dir / "best_sft_vera.pt"
-            log_path = seed_dir / "sft_vera_log.json"
+            ckpt_path = seed_dir / "best_sft_term.pt"
+            log_path = seed_dir / "sft_term_log.json"
 
             if ckpt_path.exists() and log_path.exists() and not args.force:
                 print(f"  [skip] seed={seed} exists")
@@ -243,8 +243,8 @@ def run(args):
                 cfg = copy.deepcopy(base_cfg)
                 cfg["training"]["seed"] = seed
                 cfg["training"]["output_dir"] = str(seed_dir)
-                for k, v in vera_overrides.items():
-                    cfg["vera"][k] = v
+                for k, v in term_overrides.items():
+                    cfg["term"][k] = v
 
                 if args.dry_run:
                     cfg["training"]["epochs"] = 2
@@ -272,10 +272,10 @@ def run(args):
 
             if args.run_eval and ckpt_path.exists():
                 cfg = copy.deepcopy(base_cfg)
-                for k, v in vera_overrides.items():
-                    cfg["vera"][k] = v
+                for k, v in term_overrides.items():
+                    cfg["term"][k] = v
                 cfg["training"]["seed"] = seed
-                model = build_vera_from_cfg(cfg, _device())
+                model = build_term_from_cfg(cfg, _device())
                 load_checkpoint(model, str(ckpt_path), _device())
                 _seed_everything(seed)
                 with (
@@ -309,7 +309,7 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CALVIN VERA comparison runner (matches Language-Table matrix)"
+        description="CALVIN TERM comparison runner (matches Language-Table matrix)"
     )
     parser.add_argument(
         "--config",
@@ -340,7 +340,7 @@ def main():
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Retrain even if best_sft_vera.pt exists",
+        help="Retrain even if best_sft_term.pt exists",
     )
     parser.add_argument(
         "--dry-run",

@@ -22,7 +22,7 @@ PIPE_DIR="$ROOT/checkpoints/calvin_fix_pipeline"
 CONT_DIR="$ROOT/checkpoints/calvin_continuous/seed123"
 DAGGER_PKL="$ROOT/checkpoints/calvin_dagger/seed123/dagger_episodes.pkl"
 DAGGER_DIR="$ROOT/checkpoints/calvin_dagger_ft/seed123"
-WARMSTART="${WARMSTART:-$ROOT/checkpoints/calvin_sim_vera/seed123/best_sft_vera.pt}"
+WARMSTART="${WARMSTART:-$ROOT/checkpoints/calvin_sim_term/seed123/best_sft_term.pt}"
 LOCK="$PIPE_DIR/pipeline.lock"
 LOG="$PIPE_DIR/pipeline.log"
 
@@ -55,7 +55,7 @@ python3 "$ROOT/scripts/diagnose_calvin_policy.py" \
   --device "cuda:0" 2>&1 | tee -a "$LOG" || true
 
 # ── Step 1: continuous finetune ───────────────────────────────────────────────
-CKPT_CONT="$CONT_DIR/best_sft_vera.pt"
+CKPT_CONT="$CONT_DIR/best_sft_term.pt"
 if [[ -f "$CKPT_CONT" && "${SKIP_CONT_TRAIN:-0}" == "1" ]]; then
   log "Step 1: skip continuous train (checkpoint exists)"
 else
@@ -66,8 +66,8 @@ else
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
-cfg = yaml.safe_load(Path('configs/calvin_vera_continuous.yaml').read_text())
+from training.sft_trainer_term import train
+cfg = yaml.safe_load(Path('configs/calvin_term_continuous.yaml').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 train(cfg, resume_from='$WARMSTART')
 " 2>&1 | tee -a "$CONT_DIR/train.log"
@@ -78,7 +78,7 @@ fi
 setup_eval
 for HOLD in 1 5; do
   OUT="$CONT_DIR/eval_continuous_hold${HOLD}"
-  if [[ -f "$OUT/vera_calvin_summary.json" && "${SKIP_EVAL:-0}" == "1" ]]; then
+  if [[ -f "$OUT/term_calvin_summary.json" && "${SKIP_EVAL:-0}" == "1" ]]; then
     log "Step 2: skip eval hold=$HOLD (exists)"
     continue
   fi
@@ -109,7 +109,7 @@ if [[ ! -f "$DAGGER_PKL" || "${FORCE_DAGGER_COLLECT:-0}" == "1" ]]; then
 fi
 
 # ── Step 4: DAgger finetune ───────────────────────────────────────────────────
-CKPT_DAG="$DAGGER_DIR/best_sft_vera.pt"
+CKPT_DAG="$DAGGER_DIR/best_sft_term.pt"
 if [[ -f "$DAGGER_PKL" ]]; then
   if [[ -f "$CKPT_DAG" && "${SKIP_DAGGER_TRAIN:-0}" == "1" ]]; then
     log "Step 4: skip DAgger finetune"
@@ -121,7 +121,7 @@ if [[ -f "$DAGGER_PKL" ]]; then
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
+from training.sft_trainer_term import train
 cfg = yaml.safe_load(Path('configs/calvin_dagger_ft.yaml').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 cfg['data']['dagger_episodes_pkl'] = '$DAGGER_PKL'
@@ -158,7 +158,7 @@ report = {
   'dagger_ckpt': '$FINAL_CKPT',
   'dagger_episodes': '$DAGGER_PKL',
 }
-s = Path('$FINAL_OUT/vera_calvin_summary.json')
+s = Path('$FINAL_OUT/term_calvin_summary.json')
 if s.exists():
     report['final_results'] = json.loads(s.read_text())
 Path('$PIPE_DIR/final_report.json').write_text(json.dumps(report, indent=2))

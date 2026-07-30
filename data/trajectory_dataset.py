@@ -21,11 +21,11 @@ Episode format (with low-level action vectors — recommended):
                           Language-Table : 2   [Δx, Δy]  (planar EE delta)
                           CALVIN         : 7   [x,y,z,roll,pitch,yaw,gripper]
                         If absent, action_vec_hist is returned as None and the
-                        VERA model's history encoder falls back to discrete-only.
+                        TERM model's history encoder falls back to discrete-only.
       "state_deltas":   np.ndarray (T_ep,) float32
                         Signed change in distance-to-goal at each step
                         (negative = closer, positive = farther).
-                        Used by VERA's ConsequenceLanguageEncoder (Stream 3b) to
+                        Used by TERM's ConsequenceLanguageEncoder (Stream 3b) to
                         produce rich direction×magnitude×reward consequence strings.
                         For Language-Table, approximated from consecutive reward diffs.
                         If absent, state_delta defaults to 0.0 (stationary fallback).
@@ -72,7 +72,7 @@ def make_random_episodes(
 ) -> List[Dict]:
     """
     Generate random synthetic episodes for pipeline testing.
-    Includes action_vectors so the full VERA history encoder is exercised.
+    Includes action_vectors so the full TERM history encoder is exercised.
     """
     instructions = [
         "pick up the red cube",
@@ -581,7 +581,7 @@ class TrajectoryDataset(Dataset):
 
     Handles episodes with or without 'action_vectors'. When present,
     action_vec_hist is returned as a (history_len, action_dim) tensor and
-    passed to VERA's history encoder for richer low-level conditioning.
+    passed to TERM's history encoder for richer low-level conditioning.
     When absent, action_vec_hist is None and the encoder falls back to
     discrete-only history (fully backward compatible).
 
@@ -622,7 +622,7 @@ class TrajectoryDataset(Dataset):
         self.crop_factor    = float(crop_factor)
         self.pad_action     = num_actions   # "no history" discrete padding index
 
-        # NOTE: Do not call clip.load here — VERAModel already loads CLIP. A duplicate
+        # NOTE: Do not call clip.load here — TERMModel already loads CLIP. A duplicate
         # load (train + val datasets) added minutes of startup and GPU memory for no use.
 
         self.transform = T.Compose([

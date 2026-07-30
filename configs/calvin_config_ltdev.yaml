@@ -1,6 +1,6 @@
-# VERA on CALVIN task_D_D — mirrors Language-Table **dev** recipe that worked better:
-#   vera.alignment_loss_coef:    0.05  (was 0.10 in calvin_config.yaml)
-#   vera.regression_loss_coef:   0.25  (was 0.50)
+# TERM on CALVIN task_D_D — mirrors Language-Table **dev** recipe that worked better:
+#   term.alignment_loss_coef:    0.05  (was 0.10 in calvin_config.yaml)
+#   term.regression_loss_coef:   0.25  (was 0.50)
 #   early_stopping_patience:    15     (was 10)
 #   num_workers:                 2     (match LT dev; increase if I/O bound)
 # Same as LT dev otherwise: epochs 100, batch 32, lr 3e-4, val 20%, eval 100 eps.
@@ -16,11 +16,11 @@ model:
   dropout:        0.1
   freeze_clip:    true              # start from frozen CLIP…
   unfreeze_clip_vision: true         # …then fine-tune ViT-B/32 vision only (text stays frozen)
-  # Optional: clip_vision_lr defaults to 5% of training.lr in sft_trainer_vera
+  # Optional: clip_vision_lr defaults to 5% of training.lr in sft_trainer_term
   action_dim:     7
   chunk_size:     1           # single-step BC + embodied rollout (K>1 needs chunk rollout)
 
-vera:
+term:
   use_lang_feedback:      true    # legacy alias for use_action_lang_feedback
   use_action_lang_feedback: true  # Stream 3a — action narration token
   use_temporal_history:   true

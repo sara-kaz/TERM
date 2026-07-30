@@ -11,12 +11,12 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from evaluation.evaluate_vera import build_vera_from_cfg
+from evaluation.evaluate_term import build_term_from_cfg
 
 
 def main():
     cfg = yaml.safe_load(open(REPO / "configs/calvin_config.yaml"))
-    m = build_vera_from_cfg(cfg, "cpu")
+    m = build_term_from_cfg(cfg, "cpu")
     m.train()
     B, H, T = 8, 4, 3
     frames = torch.randn(B, T, 3, 224, 224)

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Official Language-Table simulation task-success evaluation for a VERA checkpoint.
+Official Language-Table simulation task-success evaluation for a TERM checkpoint.
 
 Mirrors language_table/eval/main.py: 5 task families × N episodes, success = env.succeeded.
 
 Example (seed 123 checkpoint):
   CUDA_VISIBLE_DEVICES=0 python scripts/run_language_table_rollout_eval.py \\
-      --checkpoint checkpoints/Language_table/seed123/best_sft_vera.pt
+      --checkpoint checkpoints/Language_table/seed123/best_sft_term.pt
 
 Smoke test:
   python scripts/run_language_table_rollout_eval.py --checkpoint ... --num_episodes 2 --smoke
@@ -115,8 +115,8 @@ def run_episode(env, policy, ep_seed: int, max_steps: int) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Language-Table rollout eval for VERA")
-    parser.add_argument("--checkpoint", required=True, help="best_sft_vera.pt path")
+    parser = argparse.ArgumentParser(description="Language-Table rollout eval for TERM")
+    parser.add_argument("--checkpoint", required=True, help="best_sft_term.pt path")
     parser.add_argument(
         "--language_table_root",
         default=os.environ.get(
@@ -187,7 +187,7 @@ def main():
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
     import torch
-    from evaluation.vera_language_table_policy import VERALanguageTablePolicy
+    from evaluation.term_language_table_policy import TERMLanguageTablePolicy
 
     if torch.cuda.is_available():
         device = f"cuda:{args.device}"
@@ -222,7 +222,7 @@ def main():
         best = {"rate": -1.0, "cfg": None, "returns": -1.0}
         rf = rewards["blocktoblock"]
         for mode, mag, hold in tune_candidates:
-            pol = VERALanguageTablePolicy(
+            pol = TERMLanguageTablePolicy(
                 checkpoint=str(ckpt),
                 device=device,
                 action_mode=mode,
@@ -282,7 +282,7 @@ def main():
             )
         )
 
-    policy = VERALanguageTablePolicy(
+    policy = TERMLanguageTablePolicy(
         checkpoint=str(ckpt),
         device=device,
         action_mode=action_mode,
@@ -341,9 +341,9 @@ def main():
         per_episode[task_name] = ep_logs
         print(f"  => {task_name} task success: {rate * 100:.1f}% ({successes}/{args.num_episodes})")
 
-    overall_success = sum(v["successes"] for v in results.values())
-    overall_eps = sum(v["episodes"] for v in results.values())
-    overall_rate = overall_success / max(overall_eps, 1)
+    otermll_success = sum(v["successes"] for v in results.values())
+    otermll_eps = sum(v["episodes"] for v in results.values())
+    otermll_rate = otermll_success / max(otermll_eps, 1)
 
     summary = {
         "checkpoint": str(ckpt),
@@ -355,14 +355,14 @@ def main():
         "action_hold_steps": action_hold_steps,
         "crop_factor": args.crop_factor,
         "per_task": results,
-        "overall_task_success_rate": overall_rate,
-        "overall_successes": overall_success,
-        "overall_episodes": overall_eps,
+        "otermll_task_success_rate": otermll_rate,
+        "otermll_successes": otermll_success,
+        "otermll_episodes": otermll_eps,
         "wall_time_s": round(time.time() - t0, 1),
         "per_episode": per_episode,
     }
 
-    out_path = log_dir / "vera_language_table_summary.json"
+    out_path = log_dir / "term_language_table_summary.json"
     out_path.write_text(json.dumps(summary, indent=2))
 
     print("\n[lt_eval] ── Language-Table task success (official 5-task benchmark) ──", flush=True)
@@ -373,8 +373,8 @@ def main():
             flush=True,
         )
     print(
-        f"\n  OVERALL                         {overall_rate * 100:6.2f}%  "
-        f"({overall_success}/{overall_eps})",
+        f"\n  OTERMLL                         {otermll_rate * 100:6.2f}%  "
+        f"({otermll_success}/{otermll_eps})",
         flush=True,
     )
     print(f"\n[lt_eval] Saved {out_path}", flush=True)

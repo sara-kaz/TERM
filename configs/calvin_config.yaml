@@ -1,5 +1,5 @@
-# ── VERA — CALVIN D→D Configuration ──────────────────────────────────────────
-# Drop-in config for training VERA on CALVIN task_D_D split.
+# ── TERM — CALVIN D→D Configuration ──────────────────────────────────────────
+# Drop-in config for training TERM on CALVIN task_D_D split.
 # Matches partner's Language-Table hyperparameters exactly for fair comparison:
 #   same d_model, fusion depth, dropout, lr, batch_size, seeds, val_fraction.
 # Only dataset-specific keys differ (num_actions, action_dim, paths, vocab).
@@ -21,8 +21,8 @@ model:
   unfreeze_clip_vision: true   # ViT-B/32 image encoder trainable; text encoder stays frozen
   action_dim:     7           # 7-DoF [x, y, z, roll, pitch, yaw, gripper] ∈ [-1,1]⁷
 
-# ── VERA-Specific Settings ─────────────────────────────────────────────────────
-vera:
+# ── TERM-Specific Settings ─────────────────────────────────────────────────────
+term:
   use_lang_feedback:      true
   use_action_lang_feedback: true
   use_temporal_history:   true

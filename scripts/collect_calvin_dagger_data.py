@@ -83,7 +83,7 @@ def main():
     import hydra
     from calvin_agent.evaluation.evaluate_policy import EP_LEN
     from data.calvin_utils import sanitize_rel_action_for_calvin
-    from evaluation.vera_calvin_policy import VERACalvinPolicy, discretise_rel_action
+    from evaluation.term_calvin_policy import TERMCalvinPolicy, discretise_rel_action
 
     conf_dir = calvin_root / "calvin_models" / "conf"
     task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
@@ -92,7 +92,7 @@ def main():
     obs_space = {"rgb_obs": ["rgb_static", "rgb_gripper"], "depth_obs": []}
 
     device = f"cuda:{args.device}" if args.device >= 0 else "cpu"
-    policy = VERACalvinPolicy(
+    policy = TERMCalvinPolicy(
         checkpoint=args.checkpoint,
         device=device,
         action_mode=args.action_mode,

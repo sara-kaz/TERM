@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${VENV_PYTHON:-$HOME/work/ConvIR with Lewin/venv/bin/python}"
 CALVIN_ROOT="${CALVIN_ROOT:-$HOME/work/calvin}"
 DATA="${CALVIN_DATA:-$HOME/calvin_task_D/task_D_D}"
-CKPT="${CKPT:-$ROOT/checkpoints/calvin_core6_ltdev/full_vera/seed123/best_sft_vera.pt}"
+CKPT="${CKPT:-$ROOT/checkpoints/calvin_core6_ltdev/full_term/seed123/best_sft_term.pt}"
 GPU="${CUDA_VISIBLE_DEVICES:-0}"
 LOGDIR="${LOGDIR:-$(dirname "$CKPT")/calvin_rollout_fixed_1000}"
 

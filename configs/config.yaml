@@ -1,4 +1,4 @@
-# ── VERA-Robot-Learning Configuration ─────────────────────────────────────────
+# ── TERM-Robot-Learning Configuration ─────────────────────────────────────────
 # Vision-Language-Language-Action model with dual semantic+numerical feedback.
 # DEFAULT: Language-Table (Lynch et al., 2023) — 2-DoF planar push tasks.
 # See "Dataset Presets" section below for CALVIN / MetaWorld overrides.
@@ -26,8 +26,8 @@ model:
   chunk_size:     1           # MUST be 1 until multi-step chunk rollout is implemented
                               # (K>1 without rollout support leaves action_head unsupervised)
 
-# ── VERA-Specific Settings ─────────────────────────────────────────────────────
-vera:
+# ── TERM-Specific Settings ─────────────────────────────────────────────────────
+term:
   # Ablation flags: set any to false to run ablation experiments
   use_lang_feedback:      true    # legacy alias for use_action_lang_feedback
   use_action_lang_feedback: true  # Stream 3a
@@ -41,7 +41,7 @@ vera:
   step_horizon:           50      # fixed rollout horizon K (clip + progress scalar)
 
   # Auxiliary contrastive alignment loss coefficient (λ_align)
-  # Applied to BOTH action and consequence alignment terms (averaged).
+  # Applied to BOTH action and consequence alignment terms (atermged).
   #
   # Why 0.1 (reduced from 1.0):
   #   At λ=1.0, the InfoNCE term dominates the total loss (~3.46 units) but
@@ -89,7 +89,7 @@ data:
                                        # calvin:         expects root/training/*.npz + lang_annotations/
   calvin_split:        training # only used when dataset_type=calvin
   synthetic_episodes:  200      # episodes to generate when no real data provided
-  ep_len:              30       # average episode length for synthetic data
+  ep_len:              30       # atermge episode length for synthetic data
   img_size:            224      # resize all frames to this square size
   crop_factor:         0.95     # central crop before resize (matches LT official eval)
 
@@ -146,31 +146,31 @@ eval:
   success_threshold: 1.0         # min total return to count as success
 
 # ── Ablation Study Presets ─────────────────────────────────────────────────────
-# To run an ablation, override the vera section from the command line or
+# To run an ablation, override the term section from the command line or
 # create a separate config file that inherits these defaults.
 #
 # Ablation A — base VLA (no language feedback):
-#   vera.use_lang_feedback: false
+#   term.use_lang_feedback: false
 #
 # Ablation B — no temporal history transformer:
-#   vera.use_temporal_history: false
+#   term.use_temporal_history: false
 #
 # Ablation C — no reward gate:
-#   vera.use_reward_gate: false
+#   term.use_reward_gate: false
 #
 # Ablation D — no contrastive alignment loss:
-#   vera.alignment_loss_coef: 0.0
+#   term.alignment_loss_coef: 0.0
 #
 # Ablation E — no language feedback AND no temporal history (minimal model):
-#   vera.use_lang_feedback: false
-#   vera.use_temporal_history: false
+#   term.use_lang_feedback: false
+#   term.use_temporal_history: false
 #
 # Ablation F — action token only, no consequence token (original Stream 3):
-#   vera.use_consequence_token: false
+#   term.use_consequence_token: false
 #
 # Ablation G — consequence token only, no action token (isolate outcome signal):
-#   vera.use_lang_feedback: true
-#   vera.use_consequence_token: true
+#   term.use_lang_feedback: true
+#   term.use_consequence_token: true
 #   action_vocab: null   # action token still present; consequence ablated separately above
 
 # ── Dataset Presets ─────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ eval:
 #     dataset_type:     pkl
 #   model:
 #     action_dim:       4       # [Δx, Δy, Δz, gripper]
-#   vera:
+#   term:
 #     action_vocab:     null    # use built-in generic "I performed action N"
 #
 # CALVIN:
@@ -193,7 +193,7 @@ eval:
 #   model:
 #     num_actions:      8       # 8 dominant-axis bins (xyz roll pitch yaw + gripper)
 #     action_dim:       7       # full 7-DoF [x,y,z,roll,pitch,yaw,gripper]
-#   vera:
+#   term:
 #     action_vocab:     null
 #
 # Synthetic (pipeline testing only — no real robot data):
@@ -202,8 +202,8 @@ eval:
 #     dataset_type:     pkl
 #   model:
 #     action_dim:       4
-#   vera:
+#   term:
 #     action_vocab:     null
 #
 # Run command (any dataset):
-#   python -m training.sft_trainer_vera --config configs/config.yaml
+#   python -m training.sft_trainer_term --config configs/config.yaml

@@ -4,16 +4,16 @@
 set -euo pipefail
 
 echo "=== Stop GPU jobs ==="
-pkill -f run_vera_max_calvin_pipeline 2>/dev/null || true
-pkill -f sft_trainer_vera 2>/dev/null || true
-pkill -f "training.sft_trainer_vera import train" 2>/dev/null || true
+pkill -f run_term_max_calvin_pipeline 2>/dev/null || true
+pkill -f sft_trainer_term 2>/dev/null || true
+pkill -f "training.sft_trainer_term import train" 2>/dev/null || true
 pkill -f train_dehaze 2>/dev/null || true
 sleep 3
 
-if pgrep -f "sft_trainer_vera|train_dehaze" >/dev/null 2>&1; then
+if pgrep -f "sft_trainer_term|train_dehaze" >/dev/null 2>&1; then
   echo "Some GPU jobs still running — force kill:"
-  pgrep -af "sft_trainer_vera|train_dehaze" || true
-  pkill -9 -f sft_trainer_vera 2>/dev/null || true
+  pgrep -af "sft_trainer_term|train_dehaze" || true
+  pkill -9 -f sft_trainer_term 2>/dev/null || true
   pkill -9 -f train_dehaze 2>/dev/null || true
   sleep 2
 fi
@@ -44,5 +44,5 @@ echo ""
 export VENV_PYTHON="${VENV_PYTHON:-$HOME/work/ConvIR with Lewin/venv/bin/python}"
 bash "$(dirname "$0")/check_calvin_egl.sh"
 echo ""
-echo "Driver fix done. Resume VERA:"
-echo "  bash $(dirname "$0")/resume_vera_after_driver_fix.sh"
+echo "Driver fix done. Resume TERM:"
+echo "  bash $(dirname "$0")/resume_term_after_driver_fix.sh"

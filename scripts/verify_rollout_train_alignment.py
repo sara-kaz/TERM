@@ -65,12 +65,12 @@ def check_calvin(calvin_path: str, num_vis: int = 3) -> bool:
 
 
 def check_model_chunk(cfg_path: str) -> bool:
-    from evaluation.evaluate_vera import build_vera_from_cfg
+    from evaluation.evaluate_term import build_term_from_cfg
     import yaml
 
     cfg = yaml.safe_load(open(cfg_path))
     device = "cpu"
-    m = build_vera_from_cfg(cfg, device)
+    m = build_term_from_cfg(cfg, device)
     K = int(cfg["model"].get("chunk_size", 1))
     B = 2
     H = cfg["model"]["history_len"]

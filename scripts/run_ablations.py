@@ -17,7 +17,7 @@ Usage
 # Fast eval-only ablations (uses a pretrained full-model checkpoint)
 python scripts/run_ablations.py \\
     --config configs/config.yaml \\
-    --checkpoint checkpoints/rl/best_rl_vera.pt \\
+    --checkpoint checkpoints/rl/best_rl_term.pt \\
     --mode eval --episodes 100 --seeds 5
 
 # Full train ablations (each variant trained independently from scratch)
@@ -37,7 +37,7 @@ import numpy as np
 import yaml
 
 # ── Ablation definitions ──────────────────────────────────────────────────────
-# Each entry: (display_name, vera_config_overrides)
+# Each entry: (display_name, term_config_overrides)
 # The "Full VLLA" row uses the config as-is (no overrides).
 
 ABLATIONS = [
@@ -82,7 +82,7 @@ def run_eval_ablations(cfg: dict, checkpoint: str,
     weights were trained with all components enabled.
     """
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from evaluation.evaluate_vera import build_vera_from_cfg, load_checkpoint, evaluate_once
+    from evaluation.evaluate_term import build_term_from_cfg, load_checkpoint, evaluate_once
 
     device  = "cuda"
     try:
@@ -103,10 +103,10 @@ def run_eval_ablations(cfg: dict, checkpoint: str,
 
         abl_cfg = copy.deepcopy(cfg)
         for k, v in overrides.items():
-            abl_cfg["vera"][k] = v
+            abl_cfg["term"][k] = v
 
         # training alignment_loss_coef has no effect at eval; skip model rebuild
-        model = build_vera_from_cfg(abl_cfg, device)
+        model = build_term_from_cfg(abl_cfg, device)
         try:
             load_checkpoint(model, checkpoint, device)
         except RuntimeError:
@@ -156,9 +156,9 @@ def run_train_ablations(cfg: dict, num_seeds: int, out_dir: Path) -> dict:
     Each variant gets its own output subdirectory.
     """
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from training.sft_trainer_vera import sft_train
-    from training.rl_trainer_vera  import rl_train
-    from evaluation.evaluate_vera  import build_vera_from_cfg, load_checkpoint, evaluate_once
+    from training.sft_trainer_term import sft_train
+    from training.rl_trainer_term  import rl_train
+    from evaluation.evaluate_term  import build_term_from_cfg, load_checkpoint, evaluate_once
     import torch
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -175,7 +175,7 @@ def run_train_ablations(cfg: dict, num_seeds: int, out_dir: Path) -> dict:
         for s in range(num_seeds):
             abl_cfg = copy.deepcopy(cfg)
             for k, v in overrides.items():
-                abl_cfg["vera"][k] = v
+                abl_cfg["term"][k] = v
             seed_out = out_dir / slug / f"seed{s}"
             seed_out.mkdir(parents=True, exist_ok=True)
             abl_cfg["training"]["output_dir"] = str(seed_out)
@@ -190,10 +190,10 @@ def run_train_ablations(cfg: dict, num_seeds: int, out_dir: Path) -> dict:
             print(f"  Seed {s+1}/{num_seeds} — RL …")
             rl_train(abl_cfg)
 
-            ckpt = seed_out / "rl" / "best_rl_vera.pt"
+            ckpt = seed_out / "rl" / "best_rl_term.pt"
             if not ckpt.exists():
-                ckpt = seed_out / "best_sft_vera.pt"
-            model = build_vera_from_cfg(abl_cfg, device)
+                ckpt = seed_out / "best_sft_term.pt"
+            model = build_term_from_cfg(abl_cfg, device)
             load_checkpoint(model, str(ckpt), device)
             res = evaluate_once(model, abl_cfg, num_episodes=50,
                                 deterministic=True, seed=s)
@@ -265,7 +265,7 @@ def save_csv(results: dict, path: Path):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="VERA ablation study runner")
+    parser = argparse.ArgumentParser(description="TERM ablation study runner")
     parser.add_argument("--config",     default="configs/config.yaml")
     parser.add_argument("--checkpoint", default=None,
                         help="Pretrained VLLA checkpoint (required for --mode eval)")
@@ -274,7 +274,7 @@ def main():
     parser.add_argument("--episodes",   type=int, default=100,
                         help="Episodes per seed per ablation (eval mode only)")
     parser.add_argument("--seeds",      type=int, default=5,
-                        help="Number of random seeds to average")
+                        help="Number of random seeds to atermge")
     parser.add_argument("--out",        default="results/ablations",
                         help="Output directory for results")
     args = parser.parse_args()

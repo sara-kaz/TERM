@@ -28,7 +28,7 @@ def main():
     best_score = (-1.0, -1.0)
 
     for sub in sorted(sweep_dir.iterdir()):
-        summary_path = sub / "vera_calvin_summary.json"
+        summary_path = sub / "term_calvin_summary.json"
         if not summary_path.is_file():
             continue
         summary = json.loads(summary_path.read_text())
@@ -39,7 +39,7 @@ def main():
             best_summary = summary
 
     if best_summary is None:
-        raise SystemExit(f"No vera_calvin_summary.json found under {sweep_dir}")
+        raise SystemExit(f"No term_calvin_summary.json found under {sweep_dir}")
 
     best = {
         "action_mode": best_summary["action_mode"],

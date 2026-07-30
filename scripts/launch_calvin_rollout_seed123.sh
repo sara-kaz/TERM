@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Full CALVIN official rollout eval — Full VERA seed 123 best checkpoint.
+# Full CALVIN official rollout eval — Full TERM seed 123 best checkpoint.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${VENV_PYTHON:-$HOME/work/ConvIR with Lewin/venv/bin/python}"
 CALVIN_ROOT="${CALVIN_ROOT:-$HOME/work/calvin}"
 DATA="${CALVIN_DATA:-$HOME/calvin_task_D/task_D_D}"
-CKPT="${CKPT:-$ROOT/checkpoints/calvin_core6_ltdev/full_vera/seed123/best_sft_vera.pt}"
+CKPT="${CKPT:-$ROOT/checkpoints/calvin_core6_ltdev/full_term/seed123/best_sft_term.pt}"
 GPU="${CUDA_VISIBLE_DEVICES:-0}"
 
 export PYTHONPATH="$CALVIN_ROOT/calvin_env:$CALVIN_ROOT/calvin_models:$ROOT:${PYTHONPATH:-}"

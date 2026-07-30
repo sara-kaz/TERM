@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAXIMUM CALVIN task-success pipeline (unattended, multi-day).
 #
-# What makes this "top tier" within VERA:
+# What makes this "top tier" within TERM:
 #   • Full 7-DoF continuous actions (not discrete single-axis)
 #   • 80-epoch regression-focused training + closed-loop history dropout
 #   • Best checkpoint by val regression MSE (not classification acc)
@@ -31,7 +31,7 @@ DAG1_DIR="$ROOT/checkpoints/calvin_max_dagger_r1/seed123"
 DAG2_DIR="$ROOT/checkpoints/calvin_max_dagger_r2/seed123"
 DAG1_PKL="$MAX_DIR/dagger_r1.pkl"
 DAG2_PKL="$MAX_DIR/dagger_r2.pkl"
-WARM="${WARMSTART:-$ROOT/checkpoints/calvin_sim_vera/seed123/best_sft_vera.pt}"
+WARM="${WARMSTART:-$ROOT/checkpoints/calvin_sim_term/seed123/best_sft_term.pt}"
 
 mkdir -p "$PIPE" "$MAX_DIR" "$DAG1_DIR" "$DAG2_DIR"
 
@@ -69,7 +69,7 @@ run_train() {
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
+from training.sft_trainer_term import train
 cfg = yaml.safe_load(Path('$cfg').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 train(cfg, resume_from='$resume')
@@ -99,7 +99,7 @@ from pathlib import Path
 best_sr, best_hold, best_path = -1.0, 1, None
 base = Path('$MAX_DIR')
 for d in base.glob('eval_hold*'):
-    s = d / 'vera_calvin_summary.json'
+    s = d / 'term_calvin_summary.json'
     if not s.exists():
         continue
     j = json.loads(s.read_text())
@@ -122,13 +122,13 @@ python3 "$ROOT/scripts/diagnose_calvin_policy.py" \
 python3 "$ROOT/scripts/compute_calvin_proprio_stats.py" --calvin_path "$CALVIN" 2>&1 | tee -a "$LOG"
 
 # ── 1. Max continuous pretrain (80 ep) ────────────────────────────────────────
-CKPT_MAX="$MAX_DIR/best_sft_vera.pt"
+CKPT_MAX="$MAX_DIR/best_sft_term.pt"
 if [[ -f "$CKPT_MAX" && "${SKIP_MAX_TRAIN:-0}" == "1" ]]; then
   log "Phase 1: skip (checkpoint exists)"
 else
   log "Phase 1: max continuous pretrain (~80 epochs, GPU $TRAIN_GPU)"
   write_status '{"phase":"max_train"}'
-  run_train "configs/calvin_vera_max.yaml" "$WARM" "$MAX_DIR/train.log"
+  run_train "configs/calvin_term_max.yaml" "$WARM" "$MAX_DIR/train.log"
 fi
 [[ -f "$CKPT_MAX" ]] || { log "FATAL: $CKPT_MAX missing"; exit 1; }
 
@@ -137,7 +137,7 @@ log "Phase 2: embodied eval sweep (200 seq, continuous)"
 write_status '{"phase":"eval_sweep"}'
 for HOLD in 1 5 10 30; do
   OUT="$MAX_DIR/eval_hold${HOLD}"
-  [[ -f "$OUT/vera_calvin_summary.json" && "${SKIP_EVAL_SWEEP:-0}" == "1" ]] && continue
+  [[ -f "$OUT/term_calvin_summary.json" && "${SKIP_EVAL_SWEEP:-0}" == "1" ]] && continue
   log "  eval hold=$HOLD"
   run_eval "$CKPT_MAX" "$OUT" "$HOLD" 200
 done
@@ -161,7 +161,7 @@ if [[ ! -f "$DAG1_PKL" || "${FORCE_DAGGER:-0}" == "1" ]]; then
     --device 0 2>&1 | tee -a "$LOG"
 fi
 
-CKPT_D1="$DAG1_DIR/best_sft_vera.pt"
+CKPT_D1="$DAG1_DIR/best_sft_term.pt"
 if [[ -f "$DAG1_PKL" ]]; then
   if [[ -f "$CKPT_D1" && "${SKIP_DAGGER1_TRAIN:-0}" == "1" ]]; then
     log "Phase 3b: skip DAgger R1 train"
@@ -174,7 +174,7 @@ if [[ -f "$DAG1_PKL" ]]; then
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
+from training.sft_trainer_term import train
 cfg = yaml.safe_load(Path('configs/calvin_dagger_max_r1.yaml').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 cfg['data']['dagger_episodes_pkl'] = '$DAG1_PKL'
@@ -201,7 +201,7 @@ if [[ -f "$CKPT_FOR_R2" && (! -f "$DAG2_PKL" || "${FORCE_DAGGER:-0}" == "1") ]];
     --device 0 2>&1 | tee -a "$LOG"
 fi
 
-CKPT_D2="$DAG2_DIR/best_sft_vera.pt"
+CKPT_D2="$DAG2_DIR/best_sft_term.pt"
 if [[ -f "$DAG2_PKL" ]]; then
   if [[ -f "$CKPT_D2" && "${SKIP_DAGGER2_TRAIN:-0}" == "1" ]]; then
     log "Phase 4b: skip DAgger R2 train"
@@ -214,7 +214,7 @@ if [[ -f "$DAG2_PKL" ]]; then
 import yaml, sys
 from pathlib import Path
 sys.path.insert(0, '$ROOT')
-from training.sft_trainer_vera import train
+from training.sft_trainer_term import train
 cfg = yaml.safe_load(Path('configs/calvin_dagger_max_r2.yaml').read_text())
 cfg['data']['episodes_path'] = '$CALVIN'
 cfg['data']['dagger_episodes_pkl'] = '$DAG2_PKL'
@@ -243,7 +243,7 @@ r = {
   'dagger_r1_ckpt': '$CKPT_D1',
   'dagger_r2_ckpt': '$CKPT_D2',
 }
-s = Path('$FINAL_OUT/vera_calvin_summary.json')
+s = Path('$FINAL_OUT/term_calvin_summary.json')
 if s.exists():
     r['final_results'] = json.loads(s.read_text())
 Path('$PIPE/final_report.json').write_text(json.dumps(r, indent=2))

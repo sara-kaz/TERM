@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Official CALVIN long-horizon rollout evaluation for a trained VERA checkpoint.
+Official CALVIN long-horizon rollout evaluation for a trained TERM checkpoint.
 
-Uses mees/calvin evaluate_policy (1000 sequences by default) with VERACalvinPolicy.
+Uses mees/calvin evaluate_policy (1000 sequences by default) with TERMCalvinPolicy.
 
-Example (full VERA seed 123 peak checkpoint):
+Example (full TERM seed 123 peak checkpoint):
   CUDA_VISIBLE_DEVICES=0 python scripts/run_calvin_rollout_eval.py \\
-      --checkpoint checkpoints/calvin_core6_ltdev/full_vera/seed123/best_sft_vera.pt \\
+      --checkpoint checkpoints/calvin_core6_ltdev/full_term/seed123/best_sft_term.pt \\
       --dataset_path "$HOME/calvin_task_D/task_D_D" \\
       --calvin_root ~/work/calvin
 
@@ -25,8 +25,8 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CALVIN rollout eval for VERA")
-    parser.add_argument("--checkpoint", required=True, help="best_sft_vera.pt path")
+    parser = argparse.ArgumentParser(description="CALVIN rollout eval for TERM")
+    parser.add_argument("--checkpoint", required=True, help="best_sft_term.pt path")
     parser.add_argument(
         "--dataset_path",
         required=True,
@@ -100,8 +100,8 @@ def main():
 
     sys.path.insert(0, str(calvin_root / "calvin_models"))
     sys.path.insert(0, str(calvin_root / "calvin_env"))
-    vera_root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(vera_root))
+    term_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(term_root))
 
     from data.calvin_utils import setup_calvin_egl
 
@@ -127,7 +127,7 @@ def main():
     import torch
     from pytorch_lightning import seed_everything
 
-    from evaluation.vera_calvin_policy import VERACalvinPolicy
+    from evaluation.term_calvin_policy import TERMCalvinPolicy
     from calvin_agent.evaluation import evaluate_policy as ep
 
     device = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
@@ -140,7 +140,7 @@ def main():
     action_mode = "discrete" if args.discrete_actions else args.action_mode
 
     ep.NUM_SEQUENCES = int(args.num_sequences)
-    model = VERACalvinPolicy(
+    model = TERMCalvinPolicy(
         checkpoint=args.checkpoint,
         device=device,
         action_mode=action_mode,
@@ -192,7 +192,7 @@ def main():
 
     ep.rollout = _rollout_with_reward
 
-    # Drop tactile camera (needs full tacto stack); VERA uses rgb_static only.
+    # Drop tactile camera (needs full tacto stack); TERM uses rgb_static only.
     from calvin_env.envs.play_table_env import get_env as calvin_get_env
 
     def make_env_no_tactile(dataset_root):
@@ -216,7 +216,7 @@ def main():
     results = ep.evaluate_policy(
         model,
         env,
-        epoch="vera",
+        epoch="term",
         eval_log_dir=str(log_dir),
         debug=args.debug,
         create_plan_tsne=False,
@@ -239,7 +239,7 @@ def main():
         "lang_goal": args.lang_goal,
         "reset_history_each_step": args.reset_history_each_step,
     }
-    out_json = log_dir / "vera_calvin_summary.json"
+    out_json = log_dir / "term_calvin_summary.json"
     out_json.write_text(json.dumps(summary, indent=2))
 
     print("\n[calvin_eval] ── CALVIN chain success (official protocol) ──", flush=True)

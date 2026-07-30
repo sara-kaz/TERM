@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# When proprio finetune saves best_sft_vera.pt, run 1000-chain CALVIN eval on GPU 0.
+# When proprio finetune saves best_sft_term.pt, run 1000-chain CALVIN eval on GPU 0.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CKPT="$ROOT/checkpoints/calvin_proprio_ft/seed123/best_sft_vera.pt"
+CKPT="$ROOT/checkpoints/calvin_proprio_ft/seed123/best_sft_term.pt"
 LOGDIR="$ROOT/checkpoints/calvin_proprio_ft/seed123/calvin_rollout_eval_1000"
 OUT="$LOGDIR/nohup.log"
 

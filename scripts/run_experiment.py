@@ -25,7 +25,7 @@ python scripts/run_experiment.py \\
     --config configs/config.yaml \\
     --seeds 3 \\
     --skip-sft \\
-    --sft-checkpoint checkpoints/best_sft_vera.pt
+    --sft-checkpoint checkpoints/best_sft_term.pt
 
 # BabyAI (cheap, no GPU needed, good for debugging feedback loop)
 python scripts/run_experiment.py \\
@@ -83,7 +83,7 @@ def _merge(cfg: dict, overrides: dict) -> dict:
 
 def stage_sft(cfg: dict, seed_dir: Path, seed: int) -> Path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from training.sft_trainer_vera import sft_train
+    from training.sft_trainer_term import sft_train
     import torch
 
     _set_seed(seed)
@@ -91,7 +91,7 @@ def stage_sft(cfg: dict, seed_dir: Path, seed: int) -> Path:
     print(f"\n[SFT] seed={seed}  output={seed_dir}")
     t0 = time.time()
     sft_train(cfg)
-    ckpt = seed_dir / "best_sft_vera.pt"
+    ckpt = seed_dir / "best_sft_term.pt"
     print(f"[SFT] done in {time.time()-t0:.0f}s  checkpoint={ckpt}")
     return ckpt
 
@@ -99,14 +99,14 @@ def stage_sft(cfg: dict, seed_dir: Path, seed: int) -> Path:
 def stage_rl(cfg: dict, seed_dir: Path, seed: int,
              sft_ckpt: Optional[Path] = None) -> Path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from training.rl_trainer_vera import rl_train
+    from training.rl_trainer_term import rl_train
     import torch, shutil
 
     _set_seed(seed)
 
     # Point the RL trainer at the SFT checkpoint
     if sft_ckpt is not None and sft_ckpt.exists():
-        target = seed_dir / "best_sft_vera.pt"
+        target = seed_dir / "best_sft_term.pt"
         if not target.exists():
             shutil.copy(sft_ckpt, target)
 
@@ -114,18 +114,18 @@ def stage_rl(cfg: dict, seed_dir: Path, seed: int,
     print(f"\n[RL] seed={seed}  output={seed_dir}")
     t0 = time.time()
     rl_train(cfg)
-    ckpt = seed_dir / "rl" / "best_rl_vera.pt"
+    ckpt = seed_dir / "rl" / "best_rl_term.pt"
     print(f"[RL] done in {time.time()-t0:.0f}s  checkpoint={ckpt}")
     return ckpt
 
 
 def stage_eval(cfg: dict, ckpt: Path, num_episodes: int, seed: int) -> dict:
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from evaluation.evaluate_vera import build_vera_from_cfg, load_checkpoint, evaluate_once
+    from evaluation.evaluate_term import build_term_from_cfg, load_checkpoint, evaluate_once
     import torch
 
     device = _device()
-    model  = build_vera_from_cfg(cfg, device)
+    model  = build_term_from_cfg(cfg, device)
     try:
         load_checkpoint(model, str(ckpt), device)
     except RuntimeError:
@@ -176,7 +176,7 @@ from typing import Optional
 
 
 def main():
-    parser = argparse.ArgumentParser(description="VERA full experiment runner")
+    parser = argparse.ArgumentParser(description="TERM full experiment runner")
     parser.add_argument("--config",    default="configs/config.yaml")
     parser.add_argument("--seeds",     type=int, default=3)
     parser.add_argument("--out",       default="results/experiment",
@@ -241,14 +241,14 @@ def main():
             if args.sft_checkpoint:
                 sft_ckpt = Path(args.sft_checkpoint)
             else:
-                sft_ckpt = seed_dir / "best_sft_vera.pt"
+                sft_ckpt = seed_dir / "best_sft_term.pt"
             print(f"[SFT] skipped — using {sft_ckpt}")
         else:
             sft_ckpt = stage_sft(cfg, seed_dir, seed)
 
         # ── Stage 2: RL ────────────────────────────────────────────────────
         if args.skip_rl:
-            rl_ckpt = seed_dir / "rl" / "best_rl_vera.pt"
+            rl_ckpt = seed_dir / "rl" / "best_rl_term.pt"
             print(f"[RL] skipped — using {rl_ckpt}")
         else:
             rl_ckpt = stage_rl(cfg, seed_dir, seed, sft_ckpt)

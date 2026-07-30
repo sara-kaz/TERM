@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Official CALVIN MCIL 1000-chain eval — expect ~45–76% 1-task success (not VERA).
+# Official CALVIN MCIL 1000-chain eval — expect ~45–76% 1-task success (not TERM).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
